@@ -9,7 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from f1tyre import config, data, features, models
+from f1tyre import cliff, config, data, features, models
 from f1tyre.circuits import DESCRIPTOR_LABELS
 from f1tyre import degradation as dg
 from f1tyre import numpy_ml as ml
@@ -109,6 +109,24 @@ def plot_curve_check(table, path):
     plt.close(fig)
 
 
+def plot_cliffs(table, summary, path):
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+    bins = np.arange(8, 48, 4)
+    cliffs = table[table["cliff"]]
+    axes[0].hist([cliffs[cliffs["Compound"] == c]["knee"] for c in config.COMPOUNDS], bins=bins, stacked=True, color=[COMPOUND_COLORS[c] for c in config.COMPOUNDS], label=[c.title() for c in config.COMPOUNDS])
+    axes[0].set(xlabel="Tyre age at which the loss speeds up (laps)", ylabel="Stints", title=f"Detected cliffs ({len(cliffs)} of {len(table)} stints of 20+ laps)")
+    axes[0].legend()
+    x = np.arange(3)
+    axes[1].bar(x - 0.18, [100 * summary[c]["cliff_share"] for c in config.COMPOUNDS], 0.36, color="#E10600", label="speeds up late (cliff)")
+    axes[1].bar(x + 0.18, [100 * summary[c]["relief_share_noise_reference"] for c in config.COMPOUNDS], 0.36, color="#888888", label="slows down late (noise reference)")
+    axes[1].set_xticks(x, [c.title() for c in config.COMPOUNDS])
+    axes[1].set(ylabel="Share of stints (%)", title="Cliffs against the noise reference")
+    axes[1].legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def plot_descriptor_correlations(correlations, selected, path):
     order = sorted(correlations, key=lambda c: correlations[c])
     colors = ["#E10600" if c in selected else "#888888" for c in order]
@@ -140,6 +158,11 @@ def main():
     report["descriptor_spearman_with_severity"] = correlations
     report["severity_predicted_from_all_descriptors"] = severity_from_descriptors(severity, circuits)
     print(report["severity_predicted_from_all_descriptors"], flush=True)
+    report["descriptor_selection_p_value"] = dg.rank_permutation_p(circuits.loc[severity.index, DESCRIPTORS], severity)
+    table = circuits.loc[severity.index, "climb_m_per_km"]
+    leave_one_out = [spearman(table.drop(c), severity.drop(c)) for c in severity.index]
+    report["descriptor_selection_p_value"]["elevation_rho_leave_one_circuit_out_range"] = [round(min(leave_one_out), 3), round(max(leave_one_out), 3)]
+    print(report["descriptor_selection_p_value"], flush=True)
 
     shape_name, shape_scores = dg.select_shape(ptrain, SHAPE_CANDIDATES)
     shape = SHAPE_CANDIDATES[shape_name]
@@ -175,6 +198,12 @@ def main():
     check.to_csv(RESULTS_DIR / "curve_check.csv", index=False)
     report["curve_check_2025"] = {"mean_abs_error_s": round(float((check["actual"] - check["predicted"]).abs().mean()), 4), "points": int(len(check)), "by_shape_2025": {name: round(dg.curve_fidelity(dg.DegradationModel(alpha=100.0, **kw).fit(ptrain), ptest), 4) for name, kw in SHAPE_CANDIDATES.items()}}
     plot_curve_check(check, RESULTS_DIR / "curve_check.png")
+    cliffs = cliff.find_cliffs(panel_all)
+    cliffs.to_csv(RESULTS_DIR / "cliff_stints.csv", index=False)
+    summary = cliff.summarise_cliffs(cliffs)
+    report["cliff"] = {"min_stint_laps": cliff.MIN_CLIFF_LAPS, "min_bic_gain": cliff.MIN_BIC_GAIN, "min_extra_slope_s_per_lap": cliff.MIN_EXTRA_SLOPE, "summary": summary}
+    print("cliffs", summary, flush=True)
+    plot_cliffs(cliffs, summary, RESULTS_DIR / "cliff.png")
     final = dg.DegradationModel(selected, alpha=100.0, **shape).fit(panel_all, circuits)
     draws = bootstrap_coefficients(panel_all, circuits, selected, shape)
     draws.to_csv(RESULTS_DIR / "degradation_bootstrap.csv", index=False)
@@ -182,6 +211,15 @@ def main():
     coefficients = final.coefficients()
     report["final_model"] = {"circuit_columns": selected, "alpha": 100.0, "shape": shape}
     report["final_model_coefficients"] = {n: {"value": round(float(coefficients[n]), 5), "ci95": [round(float(low[n]), 5), round(float(high[n]), 5)]} for n in coefficients.index}
+    predicted = pd.Series(final.predict_within(panel_all, circuits), index=panel_all.index)
+    keyed = panel_all.groupby(dg.STINT_KEY)
+    slopes = pd.DataFrame({"actual": dg.stint_slopes(panel_all["y"], panel_all), "model": dg.stint_slopes(predicted, panel_all), "Compound": keyed["Compound"].first(), "laps": keyed["y"].size()})
+
+    def slope_means(group):
+        return {"stints": int(len(group)), "actual": round(float(group["actual"].mean()), 4), "model": round(float(group["model"].mean()), 4)}
+
+    report["stint_fit_in_sample"] = {"stints": int(len(slopes)), "model_below_average_stint_pct": round(100 * float(1 - slopes["model"].mean() / slopes["actual"].mean()), 1), "share_of_stints_steeper_than_model": round(float((slopes["actual"] > slopes["model"]).mean()), 3), "slope_corr": round(float(slopes["actual"].corr(slopes["model"])), 3), "by_compound": {c: slope_means(slopes[slopes["Compound"] == c]) for c in config.COMPOUNDS}, "stints_18_laps_or_fewer": slope_means(slopes[slopes["laps"] <= 18]), "stints_over_25_laps": slope_means(slopes[slopes["laps"] > 25])}
+    print("stint fit", report["stint_fit_in_sample"], flush=True)
     plot_curves(final, circuits, selected, draws, RESULTS_DIR / "degradation_by_circuit.png")
     plot_descriptor_correlations(correlations, selected, RESULTS_DIR / "circuit_characteristics.png")
     with open(RESULTS_DIR / "degradation.json", "w") as f:

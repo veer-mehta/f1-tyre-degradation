@@ -9,7 +9,8 @@ How much slower does an F1 car get with every lap on a tyre, and how fast is a l
 - **Lap-time model.** Gradient boosting (pinball loss, written in `f1tyre/numpy_ml.py`) predicts a lap relative to the race's field-median lap, in three tiers: pre-lap, pre-stint and live.
 - **Degradation model.** Within-stint least squares compares every stint only with itself, so driver, car and strategy cancel out. It gives the compound and circuit curves in the app.
 - **Circuit characteristics.** Thirteen measures (speed, braking, cornering load, elevation and others) taken from each circuit's fastest-lap telemetry. Cross-validation kept one: elevation change per km.
-- **App.** Predictor (curves with 95% bands and a fuel-burn view), Race explorer (real stints against the model), Circuits (ranking) and Model (scores).
+- **Tyre cliff detection.** Every stint of 20 or more laps is tested for a late speed-up in lap-time loss, with stints that slow down by the same amount as the noise reference.
+- **App.** Predictor (curves, a band for the average or for single stints, and a fuel-burn view), Race explorer (real stints against the model, with cliffs marked), Circuits (ranking) and Model (scores, fit against every stint, cliff results).
 
 ## Results
 
@@ -39,7 +40,21 @@ Degradation on unseen 2025 stints (seconds lost per lap of tyre age):
 | Medium | 0.050 | 0.049 |
 | Hard | 0.038 | 0.038 |
 
-Soft wears about 1.7 times faster than hard, in every season. The curve shape is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). Full tables, bootstrap intervals and ablations: `results/summary.md` and `report/report.pdf`.
+Soft wears about 1.7 times faster than hard, in every season. The curve is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). It is the average lap: over all 3,353 stints it sits 13% below the average stint slope, because long stints dominate the fit and are the gentle ones, and single stints differ a lot. The app plots every stint against the model.
+
+**Tyre cliff.** Each stint of 20 or more laps is fitted with a straight line and with a line that steepens at one age. A stint that speeds up late by at least 0.1 s per lap is a cliff. Stints that slow down by the same amount are the noise reference.
+
+| Compound | Stints | Cliff | Noise reference | Median onset (lap) | Extra loss after onset (s per lap) |
+|---|---|---|---|---|---|
+| Soft | 102 | 18% | 2% | 17 | 0.21 |
+| Medium | 509 | 12% | 3% | 14.5 | 0.23 |
+| Hard | 960 | 10% | 4% | 21 | 0.22 |
+
+About 7% of long stints have a real cliff. Most stints are pitted before one, and onset ages vary, so an average curve cannot show it. The Race explorer marks detected cliffs.
+
+**Circuit characteristic.** Elevation change per km correlates 0.59 with measured circuit severity (p = 0.02 after allowing for picking the best of 13 characteristics, and 0.55 to 0.66 when any one circuit is dropped). No physical mechanism is proven.
+
+Full tables, bootstrap intervals and ablations: `results/summary.md` and `report/report.pdf`.
 
 ## Run it
 
@@ -58,20 +73,12 @@ The data is in `data/`, so no F1 account is needed. To download it again, instal
 
 ```
 app.py, evaluate*.py, predict_demo.py, fetch_*.py
-f1tyre/      config, data, features, circuits, degradation, numpy_ml, models, metrics
+f1tyre/      config, data, features, circuits, degradation, cliff, numpy_ml, models, metrics
 tests/       unit tests
 data/        race laps (92 CSVs) and circuits.csv
 results/     metrics, figures, summary
 report/      report.pdf and editable report.docx, with build scripts
 reference_sklearn_xgboost/   earlier scikit-learn and XGBoost version, for comparison
 ```
-
-## Honest limits
-
-- A single lap carries about 0.33 s of random noise, so lap-level R2 tops out near 0.9. Most pre-lap error is each driver's race-specific offset.
-- The target is relative to the field-median lap, which comes from the race itself.
-- Circuit effects are weak: with 25 circuits, only elevation change held up, and predicting a circuit's severity from all thirteen fails on unseen circuits.
-- The curves describe typical behaviour, not a strategy recommendation. Single stints vary a lot (modelled and actual stint slopes correlate at 0.40), and because the fit weighs every lap equally and long stints are the gentle ones, the line sits about 14% below the average stint slope (soft 0.068 against 0.083 s per lap). The Model tab plots all 3,353 stints. Weighting stints equally removes that gap but fits unseen 2025 stints worse, so it was not adopted.
-- Some design choices were made while looking at 2025, so that holdout is slightly optimistic. Cross-validation is the better estimate.
 
 Lap data comes from FastF1 (Formula 1 timing data). Keep the repository private.

@@ -53,6 +53,14 @@
     "leave_one_circuit_out_r2": -0.1715,
     "leave_one_circuit_out_spearman": 0.3023
   },
+  "descriptor_selection_p_value": {
+    "strongest_abs_spearman": 0.5915384615384616,
+    "p_value_best_of_columns": 0.0248,
+    "elevation_rho_leave_one_circuit_out_range": [
+      0.548,
+      0.658
+    ]
+  },
   "shape_selection": {
     "cv_within_mae_by_shape": {
       "quadratic": 0.3766,
@@ -276,6 +284,45 @@
       "piecewise-linear, knots 4-22, strong smoothing": 0.1446
     }
   },
+  "cliff": {
+    "min_stint_laps": 20,
+    "min_bic_gain": 10.0,
+    "min_extra_slope_s_per_lap": 0.1,
+    "summary": {
+      "ALL": {
+        "stints": 1571,
+        "cliff_share": 0.1082,
+        "relief_share_noise_reference": 0.0376,
+        "cliff_stints": 170,
+        "median_onset_age": 18.0,
+        "median_extra_slope_s_per_lap": 0.225
+      },
+      "SOFT": {
+        "stints": 102,
+        "cliff_share": 0.1765,
+        "relief_share_noise_reference": 0.0196,
+        "cliff_stints": 18,
+        "median_onset_age": 17.0,
+        "median_extra_slope_s_per_lap": 0.208
+      },
+      "MEDIUM": {
+        "stints": 509,
+        "cliff_share": 0.1179,
+        "relief_share_noise_reference": 0.0314,
+        "cliff_stints": 60,
+        "median_onset_age": 14.5,
+        "median_extra_slope_s_per_lap": 0.226
+      },
+      "HARD": {
+        "stints": 960,
+        "cliff_share": 0.0958,
+        "relief_share_noise_reference": 0.0427,
+        "cliff_stints": 92,
+        "median_onset_age": 21.0,
+        "median_extra_slope_s_per_lap": 0.224
+      }
+    }
+  },
   "final_model": {
     "circuit_columns": [
       "climb_m_per_km"
@@ -343,6 +390,39 @@
         0.00308,
         0.01264
       ]
+    }
+  },
+  "stint_fit_in_sample": {
+    "stints": 3353,
+    "model_below_average_stint_pct": 13.4,
+    "share_of_stints_steeper_than_model": 0.533,
+    "slope_corr": 0.403,
+    "by_compound": {
+      "SOFT": {
+        "stints": 492,
+        "actual": 0.0836,
+        "model": 0.0686
+      },
+      "MEDIUM": {
+        "stints": 1403,
+        "actual": 0.0571,
+        "model": 0.0503
+      },
+      "HARD": {
+        "stints": 1458,
+        "actual": 0.0468,
+        "model": 0.0409
+      }
+    },
+    "stints_18_laps_or_fewer": {
+      "stints": 1666,
+      "actual": 0.0692,
+      "model": 0.0556
+    },
+    "stints_over_25_laps": {
+      "stints": 816,
+      "actual": 0.0351,
+      "model": 0.0372
     }
   }
 }

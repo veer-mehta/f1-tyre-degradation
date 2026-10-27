@@ -3,7 +3,7 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from f1tyre import config, data, degradation, features, models
+from f1tyre import cliff, config, data, degradation, features, models
 from f1tyre.circuits import DESCRIPTOR_LABELS
 
 
@@ -90,8 +90,8 @@ def circuit_profile(row, selected):
     return f'<div class="f1-stats">{blocks}</div>'
 
 
-def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s):
-    c1, c2, c3 = st.columns([2, 1.3, 1.5])
+def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread):
+    c1, c2, c3, c4 = st.columns([2, 1.3, 1.5, 1.7])
     with c1:
         label("Circuit")
         events = sorted(circuits.index)
@@ -102,6 +102,9 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s):
     with c3:
         label("View")
         view = st.radio("View", ["Tyre effect", "Lap time with fuel burn"], horizontal=True, label_visibility="collapsed")
+    with c4:
+        label("Shaded band")
+        band_mode = st.radio("Shaded band", ["Average (95%)", "Single stints (80%)"], horizontal=True, label_visibility="collapsed")
     ages = np.arange(1, MAX_AGE + 1)
     frames = []
     for c in config.COMPOUNDS:
@@ -110,6 +113,11 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s):
             frame["low"], frame["high"] = model.curve_band(c, circuits.loc[event], track_temp, ages, draws)
         frames.append(frame)
     curves = pd.concat(frames, ignore_index=True)
+    if band_mode.startswith("Single"):
+        low_slope = curves["compound"].str.upper().map({c: spread[c][0] for c in spread})
+        high_slope = curves["compound"].str.upper().map({c: spread[c][1] for c in spread})
+        curves["low"] = curves["loss"] + low_slope * (curves["age"] - 1)
+        curves["high"] = curves["loss"] + high_slope * (curves["age"] - 1)
     fuel_view = view.startswith("Lap time")
     if fuel_view:
         burn = fuel_total_s / totals[event] * (curves["age"] - 1)
@@ -123,7 +131,7 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s):
     label("Circuit profile (from fastest-lap telemetry)")
     st.markdown(circuit_profile(circuits.loc[event], selected), unsafe_allow_html=True)
     used = ", ".join(DESCRIPTOR_LABELS[c].lower() for c in selected) or "none"
-    st.markdown(f'<div class="f1-note">Each stint is compared only with itself, so driver, car and strategy cancel out; the model is fitted on 2022-2025 races, and the shaded bands are 95% intervals from resampling races. Besides compound and tyre age it uses track temperature and the circuit characteristics that held up in testing: {used} (marked in red). The other circuit characteristics showed no reliable link to degradation. Treat the curves as typical behaviour, not a strategy call. "Lap time with fuel burn" adds the time gained as the car gets lighter (about {fuel_total_s / totals[event]:.2f} s per lap here), so lap times can fall even while the tyre degrades.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="f1-note">Each stint is compared only with itself, so driver, car and strategy cancel out; the model is fitted on 2022-2025 races, and the shaded band is either the 95% interval of the average curve (from resampling races) or the range holding the middle 80% of real stints, which is much wider because stints differ a lot. Besides compound and tyre age it uses track temperature and the circuit characteristics that held up in testing: {used} (marked in red). The other circuit characteristics showed no reliable link to degradation. Treat the curves as typical behaviour, not a strategy call. "Lap time with fuel burn" adds the time gained as the car gets lighter (about {fuel_total_s / totals[event]:.2f} s per lap here), so lap times can fall even while the tyre degrades.</div>', unsafe_allow_html=True)
 
 
 def lap_model_table(report):
@@ -164,13 +172,19 @@ def correlation_chart(deg):
     return bars.configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#BDBDC2", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2")
 
 
+def stint_spread(table):
+    gap = table["actual"] - table["model"]
+    return {c: (float(gap[table["Compound"] == c.title()].quantile(0.1)), float(gap[table["Compound"] == c.title()].quantile(0.9))) for c in config.COMPOUNDS}
+
+
 def stint_chart(frame):
     colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
     x = alt.X("age:Q", title="Tyre age (laps)")
     dots = alt.Chart(frame).mark_circle(size=70, opacity=0.9).encode(x=x, y=alt.Y("actual:Q", title="Lap time vs stint average, fuel-corrected (s)"), color=alt.Color("Compound:N", scale=colors, legend=None), tooltip=["age", "actual", "predicted"])
     line = alt.Chart(frame).mark_line(color="#F2F2F2", strokeWidth=2).encode(x=x, y="predicted:Q")
     trend = alt.Chart(frame).mark_line(color="#8E8E93", strokeWidth=1.5, strokeDash=[5, 4]).encode(x=x, y="trend:Q")
-    return alt.layer(dots, trend, line).properties(height=260).facet(column=alt.Column("stint_label:N", title=None, header=alt.Header(labelColor="#BDBDC2", labelFontSize=12))).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
+    rule = alt.Chart(frame).mark_rule(color="#E10600", strokeDash=[2, 3], strokeWidth=2).transform_filter("isValid(datum.knee)").encode(x="knee:Q")
+    return alt.layer(dots, trend, line, rule).properties(height=260).facet(column=alt.Column("stint_label:N", title=None, header=alt.Header(labelColor="#BDBDC2", labelFontSize=12))).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
 
 
 def explorer_tab(model, circuits, panel):
@@ -191,17 +205,21 @@ def explorer_tab(model, circuits, panel):
     stints["predicted"] = degradation.within_stint(pd.Series(model.predict_level(stints, circuits), index=stints.index), stints)
     stints["Compound"] = stints["Compound"].str.title()
     stints["trend"] = degradation.within_stint(stints["age"], stints) * degradation.stint_slopes(stints["y"], stints).reindex(pd.MultiIndex.from_frame(stints[degradation.STINT_KEY])).to_numpy()
+    found = cliff.find_cliffs(stints)
+    stints = stints.merge(found.assign(knee=found["knee"].where(found["cliff"]))[["Stint", "knee"]], on="Stint", how="left")
     stints["stint_label"] = stints.apply(lambda r: f"Stint {int(r['Stint'])}: {r['Compound']}", axis=1)
     st.write("")
     st.altair_chart(stint_chart(stints), use_container_width=True, theme=None)
     slopes = degradation.stint_slopes(stints["y"], stints)
     fitted = degradation.stint_slopes(stints["predicted"], stints)
-    html = "<table><tr><th>Stint</th><th>Compound</th><th>Clean laps</th><th>Actual (s per lap)</th><th>Model (s per lap)</th></tr>"
+    html = "<table><tr><th>Stint</th><th>Compound</th><th>Clean laps</th><th>Actual (s per lap)</th><th>Model (s per lap)</th><th>Cliff</th></tr>"
     for (key, actual), predicted in zip(slopes.items(), fitted.values):
         group = stints[stints["Stint"] == key[2]]
-        html += f"<tr><td>{int(key[2])}</td><td>{group['Compound'].iloc[0]}</td><td>{len(group)}</td><td>{actual:+.3f}</td><td>{predicted:+.3f}</td></tr>"
+        hit = found[(found["Stint"] == key[2]) & found["cliff"]]
+        cliff_text = f"from lap {hit['knee'].iloc[0]:.0f}, +{hit['extra_slope'].iloc[0]:.2f} s per lap" if len(hit) else ("not tested (under 20 laps)" if len(group) < cliff.MIN_CLIFF_LAPS else "none")
+        html += f"<tr><td>{int(key[2])}</td><td>{group['Compound'].iloc[0]}</td><td>{len(group)}</td><td>{actual:+.3f}</td><td>{predicted:+.3f}</td><td>{cliff_text}</td></tr>"
     st.markdown(html + "</table>", unsafe_allow_html=True)
-    st.markdown('<div class="f1-note">Real stints from the data: dots are the driver\'s dry, green-flag laps after removing fuel burn and the stint average, the white line is what the degradation model expects for a typical stint and the dashed grey line is this stint\'s own straight-line trend. The Model tab shows how the typical line compares with all stints. Single stints are noisy (traffic, tyre management, a lift for fuel saving); the model describes the typical case. Only stints of at least 8 clean laps are shown.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="f1-note">Real stints from the data: dots are the driver\'s dry, green-flag laps after removing fuel burn and the stint average, the white line is what the degradation model expects for a typical stint, the dashed grey line is this stint\'s own straight-line trend and a red dotted line marks a detected tyre cliff, the age at which the loss speeds up. The Model tab shows how the typical line compares with all stints. Single stints are noisy (traffic, tyre management, a lift for fuel saving); the model describes the typical case. Only stints of at least 8 clean laps are shown.</div>', unsafe_allow_html=True)
 
 
 def circuits_tab(model, circuits, selected):
@@ -240,14 +258,32 @@ def slope_check_chart(table):
     return alt.layer(dots, diagonal).properties(height=340).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2")
 
 
-def slope_check(table):
+def slope_check(table, deg):
     by_compound = table.groupby("Compound")[["actual", "model"]].mean()
     rows = "".join(f"<tr><td>{c}</td><td>{by_compound.loc[c, 'actual']:.3f}</td><td>{by_compound.loc[c, 'model']:.3f}</td></tr>" for c in ["Soft", "Medium", "Hard"])
     short = table[table["laps"] <= 18]
     long = table[table["laps"] > 25]
     html = f"<table><tr><th>Compound</th><th>Average actual stint (s per lap)</th><th>Model (s per lap)</th></tr>{rows}</table>"
-    note = f'Over all {len(table):,} stints the model is on average {100 * (1 - table["model"].mean() / table["actual"].mean()):.0f}% below the average stint slope, and {100 * (table["actual"] > table["model"]).mean():.0f}% of stints are steeper than the line. Stints of 18 laps or fewer average {short["actual"].mean():.3f} s per lap against {short["model"].mean():.3f} modelled; stints over 25 laps average {long["actual"].mean():.3f} against {long["model"].mean():.3f}. The fit weighs every lap equally, so long stints dominate, and long stints are the gentle ones, because tyres that wear fast are changed early. Individual stints vary a lot (correlation between modelled and actual slope {table["actual"].corr(table["model"]):.2f}), so the line describes the typical lap, not each stint. These stints were used to fit the model, so this is not a held-out check.'
+    note = f'Over all {len(table):,} stints the model is on average {deg.get("stint_fit_in_sample", {}).get("model_below_average_stint_pct", 100 * (1 - table["model"].mean() / table["actual"].mean())):.0f}% below the average stint slope, and {100 * (table["actual"] > table["model"]).mean():.0f}% of stints are steeper than the line. Stints of 18 laps or fewer average {short["actual"].mean():.3f} s per lap against {short["model"].mean():.3f} modelled; stints over 25 laps average {long["actual"].mean():.3f} against {long["model"].mean():.3f}. The fit weighs every lap equally, so long stints dominate, and long stints are the gentle ones, because tyres that wear fast are changed early. Individual stints vary a lot (correlation between modelled and actual slope {table["actual"].corr(table["model"]):.2f}), so the line describes the typical lap, not each stint. These stints were used to fit the model, so this is not a held-out check.'
     return html, note
+
+
+def cliff_section(deg):
+    path = config.RESULTS_DIR / "cliff_stints.csv"
+    if not path.exists() or "cliff" not in deg:
+        return
+    table = pd.read_csv(path)
+    summary = deg["cliff"]["summary"]
+    label("Tyre cliff: stints where the lap-time loss speeds up late (stints of 20 or more laps)")
+    rows = "".join(f"<tr><td>{c.title()}</td><td>{summary[c]['stints']}</td><td>{100 * summary[c]['cliff_share']:.0f}%</td><td>{100 * summary[c]['relief_share_noise_reference']:.0f}%</td><td>{summary[c]['median_onset_age'] if summary[c]['median_onset_age'] is not None else '-'}</td><td>{summary[c]['median_extra_slope_s_per_lap'] if summary[c]['median_extra_slope_s_per_lap'] is not None else '-'}</td></tr>" for c in config.COMPOUNDS)
+    st.markdown(f"<table><tr><th>Compound</th><th>Stints</th><th>Speed up late (cliff)</th><th>Slow down late (noise reference)</th><th>Median onset (lap)</th><th>Extra loss after onset (s per lap)</th></tr>{rows}</table>", unsafe_allow_html=True)
+    cliffs = table[table["cliff"]].copy()
+    cliffs["Compound"] = cliffs["Compound"].str.title()
+    colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
+    bars = alt.Chart(cliffs).mark_bar().encode(x=alt.X("knee:Q", bin=alt.Bin(step=4, extent=[8, 48]), title="Tyre age at which the loss speeds up (laps)"), y=alt.Y("count():Q", title="Stints"), color=alt.Color("Compound:N", scale=colors, legend=alt.Legend(orient="top", title=None))).properties(height=240)
+    st.altair_chart(bars.configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2"), use_container_width=True, theme=None)
+    st.markdown(f'<div class="f1-note">Each long stint is fitted with a straight line and with a straight line that steepens at one age. A cliff is a clear improvement from steepening (BIC gain over {cliff.MIN_BIC_GAIN:.0f}) with at least {cliff.MIN_EXTRA_SLOPE:.1f} s per lap of extra loss. {100 * summary["ALL"]["cliff_share"]:.0f}% of long stints show one, against {100 * summary["ALL"]["relief_share_noise_reference"]:.0f}% that slow down by the same amount, which is what chance alone would give: so about {100 * (summary["ALL"]["cliff_share"] - summary["ALL"]["relief_share_noise_reference"]):.0f}% of long stints have a real cliff, typically {summary["ALL"]["median_extra_slope_s_per_lap"]:.2f} s per lap steeper afterwards. Most stints never reach a cliff because teams pit first, and onset ages vary, so an average curve cannot show it. The soft sample is small ({summary["SOFT"]["cliff_stints"]} cliffs).</div>', unsafe_allow_html=True)
+    st.write("")
 
 
 def headline(report, deg):
@@ -281,13 +317,14 @@ def model_tab(model, circuits, panel):
     label("Does the line fit every stint? Actual against modelled slope, all stints 2022-2025")
     table = slope_table(model, circuits, panel)
     st.altair_chart(slope_check_chart(table), use_container_width=True, theme=None)
-    html, note = slope_check(table)
+    html, note = slope_check(table, deg)
     st.markdown(html, unsafe_allow_html=True)
     st.markdown(f'<div class="f1-note">{note}</div>', unsafe_allow_html=True)
     st.write("")
+    cliff_section(deg)
     label("Which circuit characteristics affect degradation?")
     st.altair_chart(correlation_chart(deg), use_container_width=True, theme=None)
-    st.markdown('<div class="f1-note">Thirteen characteristics were measured from telemetry. Only elevation change was chosen by cross-validation on the training seasons, and it improves held-out stint slopes modestly. Predicting a circuit\'s degradation from all thirteen fails on circuits left out, because tyre allocation, weather and race events also matter.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="f1-note">Thirteen characteristics were measured from telemetry. Only elevation change was chosen by cross-validation on the training seasons. Its correlation with measured degradation (0.59) stays significant after allowing for picking the best of thirteen (p = 0.02) and for dropping any one circuit (0.55 to 0.66), but no physical mechanism is proven and it improves held-out stint slopes only modestly. Predicting a circuit\'s degradation from all thirteen fails on circuits left out, because tyre allocation, weather and race events also matter.</div>', unsafe_allow_html=True)
 
 
 def main():
@@ -296,8 +333,9 @@ def main():
     st.markdown('<div class="f1-bar"></div><div class="f1-title">Tyre Degradation</div><div class="f1-sub">How much slower a stint gets with every lap on the tyre</div>', unsafe_allow_html=True)
     model, circuits, selected, draws, totals, fuel_total_s, panel = load_model()
     tab_predict, tab_explore, tab_circuits, tab_model = st.tabs(["Predictor", "Race explorer", "Circuits", "Model"])
+    spread = stint_spread(slope_table(model, circuits, panel))
     with tab_predict:
-        predictor_tab(model, circuits, selected, draws, totals, fuel_total_s)
+        predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread)
     with tab_explore:
         explorer_tab(model, circuits, panel)
     with tab_circuits:

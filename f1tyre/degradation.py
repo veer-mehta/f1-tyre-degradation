@@ -170,6 +170,20 @@ def rank_descriptors(panel, circuits, columns):
     return sorted(columns, key=lambda c: -abs(rho[c]))
 
 
+def rank_permutation_p(table, severity, n_permutations=5000, seed=42):
+    """p-value for the strongest rank correlation among all columns, allowing for having picked the best of them."""
+    ranks = table.rank().to_numpy()
+    target = severity.rank().to_numpy()
+    rng = np.random.RandomState(seed)
+
+    def strongest(values):
+        return max(abs(np.corrcoef(ranks[:, j], values)[0, 1]) for j in range(ranks.shape[1]))
+
+    observed = strongest(target)
+    null = np.array([strongest(rng.permutation(target)) for _ in range(n_permutations)])
+    return {"strongest_abs_spearman": float(observed), "p_value_best_of_columns": float(np.mean(null >= observed))}
+
+
 def select_shape(panel, candidates, alpha=100.0, n_folds=5):
     folds = race_folds(panel, n_folds)
     within, fidelity = {}, {}

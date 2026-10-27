@@ -36,6 +36,14 @@ class DegradationModelTests(unittest.TestCase):
         self.assertTrue(all(curve[0] == 0.0 for curve in curves.values()))
         self.assertTrue(curves["SOFT"][-1] > curves["MEDIUM"][-1] > curves["HARD"][-1])
 
+    def test_rank_permutation_p_separates_a_real_driver_from_noise(self):
+        rng = np.random.RandomState(3)
+        table = pd.DataFrame(rng.normal(size=(25, 6)), columns=list("abcdef"))
+        real = table["a"] + 0.3 * rng.normal(size=25)
+        noise = pd.Series(rng.normal(size=25))
+        self.assertLess(degradation.rank_permutation_p(table, real, 1000)["p_value_best_of_columns"], 0.02)
+        self.assertGreater(degradation.rank_permutation_p(table, noise, 1000)["p_value_best_of_columns"], 0.05)
+
     def test_circuit_modifier_is_recovered(self):
         circuits = pd.DataFrame({"severity": [-1.0, 0.0, 1.0, 2.0]}, index=[f"circuit_{i}" for i in range(4)])
         z = (circuits["severity"] - circuits["severity"].mean()) / circuits["severity"].std()
