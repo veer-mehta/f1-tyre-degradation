@@ -9,7 +9,7 @@ How much slower does an F1 car get with every lap on a tyre, and how fast is a l
 - **Lap-time model.** Gradient boosting (pinball loss, written in `f1tyre/gradient_boosting.py`) predicts a lap relative to the race's field-median lap, in three tiers: pre-lap, pre-stint and live.
 - **Degradation model.** Within-stint least squares compares every stint only with itself, so driver, car and strategy cancel out. It gives the compound and circuit curves in the app.
 - **Circuit characteristics.** Thirteen measures (speed, braking, cornering load, elevation and others) taken from each circuit's fastest-lap telemetry. Cross-validation kept one: elevation change per km.
-- **App.** Predictor (tyre curves with a band for the average or for single stints and a fuel-burn view, and a lap-time predictor that runs the pre-lap and live gradient boosting models on laps you type, paste or upload), Race explorer (real stints against the model), Circuits (ranking) and Model (scores and circuit characteristics).
+- **App.** Predictor (tyre curves with a band for the average or for single stints and a fuel-burn view, and a lap-time predictor that runs the pre-lap and live gradient boosting models on laps you type, paste or upload), Race explorer (real stints against the model), Circuits (ranking) and Model (scores, a button that re-runs the saved models on the 2025 test laps to verify them, and circuit characteristics).
 
 ## Results
 

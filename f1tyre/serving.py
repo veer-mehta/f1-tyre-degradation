@@ -113,14 +113,24 @@ def stint_spread(model, circuits, panel):
     return {c: (float(gap[compound == c].quantile(0.1)), float(gap[compound == c].quantile(0.9))) for c in COMPOUNDS}
 
 
+def verify_scores(verify):
+    x, y = verify["x"], verify["y"]
+    preds = {"Median baseline": np.full(len(y), verify["median"]), "Persistence (last 3 laps)": x["prev3_delta"].fillna(verify["median"]).to_numpy()}
+    for tier, name in [("pre_lap", "Gradient boosting, pre-lap"), ("live", "Gradient boosting, live")]:
+        preds[name] = verify["models"][tier].predict(x[TIERS[tier]].to_numpy())
+    return {name: (models.mae(y, p), models.r2(y, p)) for name, p in preds.items()}
+
+
 def build():
     laps = features.build_lap_table(features.load_laps())
+    train, test = features.split_years(laps)
+    verify = {"models": {tier: models.fit_gb(train, TIERS[tier], tier) for tier in SERVED_TIERS}, "x": test[TIERS["live"]].reset_index(drop=True), "y": test["delta"].to_numpy(), "median": float(train["delta"].median())}
     circuits = features.load_circuits()
     report = json.loads((RESULTS_DIR / "degradation.json").read_text())
     fuel_total_s = models.estimate_fuel_effect(laps)
     panel = degradation.build_panel(laps, fuel_total_s)
     model = degradation.model_from_report(report).fit(panel, circuits)
-    return {"degradation": model, "circuits": circuits, "selected": report["final_model"]["circuit_columns"], "draws": pd.read_csv(RESULTS_DIR / "degradation_bootstrap.csv"), "totals": laps.groupby("EventName")["TotalLaps"].max().to_dict(), "fuel_total_s": fuel_total_s, "panel": panel, "spread": stint_spread(model, circuits, panel), "served": {tier: models.fit_gb(laps, TIERS[tier], tier) for tier in SERVED_TIERS}, "defaults": reference_defaults(laps, circuits), "example": example_rows(laps)}
+    return {"degradation": model, "circuits": circuits, "selected": report["final_model"]["circuit_columns"], "draws": pd.read_csv(RESULTS_DIR / "degradation_bootstrap.csv"), "totals": laps.groupby("EventName")["TotalLaps"].max().to_dict(), "fuel_total_s": fuel_total_s, "panel": panel, "spread": stint_spread(model, circuits, panel), "served": {tier: models.fit_gb(laps, TIERS[tier], tier) for tier in SERVED_TIERS}, "defaults": reference_defaults(laps, circuits), "example": example_rows(laps), "verify": verify}
 
 
 def refresh():

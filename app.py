@@ -316,7 +316,20 @@ def headline(report, deg):
     st.write("")
 
 
-def model_tab():
+def verify_section(verify):
+    label("Verify the scores yourself: run saved models on 2025 laps they never saw")
+    st.markdown(f'<div class="f1-note" style="margin-top: 0">The models below were trained on 2022 to 2024 only. The button runs them on all {len(verify["y"]):,} clean laps of 2025 and computes MAE and R&sup2; here, with the from-scratch code. R&sup2; is the share of lap-time variation explained (0.82 means 82%), not the share of laps predicted correctly.</div>', unsafe_allow_html=True)
+    if st.button("Run on the 2025 test laps"):
+        with st.spinner("Predicting"):
+            scores = serving.verify_scores(verify)
+        html = "<table><tr><th>Model</th><th>MAE (s)</th><th>R&sup2;</th></tr>"
+        for name, (mae, r2) in scores.items():
+            html += f"<tr><td>{name}</td><td>{mae:.3f}</td><td>{max(r2, 0.0):.3f}</td></tr>"
+        st.markdown(html + "</table>", unsafe_allow_html=True)
+    st.write("")
+
+
+def model_tab(verify):
     path = config.RESULTS_DIR / "metrics.json"
     deg = read_report()
     if not path.exists() or not deg:
@@ -328,6 +341,7 @@ def model_tab():
     st.markdown(lap_model_table(report), unsafe_allow_html=True)
     st.markdown('<div class="f1-note">Gradient boosting implemented from scratch in NumPy. Pre-lap uses everything known at the start of the lap except the driver\'s own previous lap times; pre-stint adds how the driver went in earlier stints of the race; live adds the recent laps of the current stint. Target is lap time relative to the race\'s field-median lap.</div>', unsafe_allow_html=True)
     st.write("")
+    verify_section(verify)
     label("Degradation model: average degradation by compound, unseen 2025 stints")
     st.markdown(degradation_table(deg), unsafe_allow_html=True)
     st.write("")
@@ -353,7 +367,7 @@ def main():
     with tab_circuits:
         circuits_tab(a["degradation"], a["circuits"], a["selected"])
     with tab_model:
-        model_tab()
+        model_tab(a["verify"])
 
 
 main()
