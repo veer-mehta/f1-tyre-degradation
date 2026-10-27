@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from f1tyre import config, features, models
 from f1tyre.config import DESCRIPTOR_LABELS
 from f1tyre import degradation as dg
-from f1tyre import numpy_ml as ml
 
 
 RESULTS_DIR = config.RESULTS_DIR
@@ -46,8 +45,8 @@ def severity_from_descriptors(severity, circuits):
     predictions = np.zeros(len(severity))
     for i in range(len(severity)):
         keep = np.arange(len(severity)) != i
-        predictions[i] = ml.RidgeRegression(alpha=10.0).fit(z[keep], severity.to_numpy()[keep]).predict(z[i : i + 1])[0]
-    return {"leave_one_circuit_out_r2": round(ml.r2(severity.to_numpy(), predictions), 4), "leave_one_circuit_out_spearman": round(spearman(predictions, severity), 4)}
+        predictions[i] = models.RidgeRegression(alpha=10.0).fit(z[keep], severity.to_numpy()[keep]).predict(z[i : i + 1])[0]
+    return {"leave_one_circuit_out_r2": round(models.r2(severity.to_numpy(), predictions), 4), "leave_one_circuit_out_spearman": round(spearman(predictions, severity), 4)}
 
 
 def single_descriptor_effects(panel_all, ptrain, ptest, circuits, baseline, shape):

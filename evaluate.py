@@ -6,7 +6,6 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from f1tyre import numpy_ml as ml
 from f1tyre import config, features, models
 
 
@@ -42,7 +41,7 @@ def stint_slopes(test, pred, fuel_total_s, min_laps=15):
 
 def score(test, pred, fuel_total_s=None):
     y = test["delta"].values
-    out = {"mae_s": ml.mae(y, pred), "median_ae_s": ml.median_ae(y, pred), "rmse_s": ml.rmse(y, pred), "r2": ml.r2(y, pred), "curve_mae_s": curve_error(test, pred)}
+    out = {"mae_s": models.mae(y, pred), "median_ae_s": models.median_ae(y, pred), "rmse_s": models.rmse(y, pred), "r2": models.r2(y, pred), "curve_mae_s": curve_error(test, pred)}
     if fuel_total_s is not None:
         s = stint_slopes(test, pred, fuel_total_s)
         out["slope_mae_s_per_lap"] = float(np.abs(s[:, 0] - s[:, 1]).mean())
@@ -66,7 +65,7 @@ def predict_all(train, test):
     preds = {"median_baseline": np.full(len(test), median), "persistence_last3_laps": test["prev3_delta"].fillna(median).values}
     preds.update(models.fit_formulas(train, test, fuel_total_s))
     cols = config.TIERS["pre_lap"]
-    preds["ridge_pre_lap_features"] = ml.RidgeRegression().fit(train[cols].values, train["delta"].values).predict(test[cols].values)
+    preds["ridge_pre_lap_features"] = models.RidgeRegression().fit(train[cols].values, train["delta"].values).predict(test[cols].values)
     fitted = {}
     for tier in config.TIERS:
         fitted[tier] = models.fit_gb(train, config.TIERS[tier], tier)
@@ -89,13 +88,13 @@ def mixed_year_cv(laps):
         preds, _, _ = predict_all(laps[~is_test].reset_index(drop=True), laps[is_test].reset_index(drop=True))
         for name in MODEL_ORDER:
             oof[name][is_test] = preds[name]
-            fold_mae[name].append(ml.mae(laps.loc[is_test, "delta"], preds[name]))
+            fold_mae[name].append(models.mae(laps.loc[is_test, "delta"], preds[name]))
         print("mixed-year fold", fold, flush=True)
     out = {}
     for name in MODEL_ORDER:
         out[name] = score(laps, oof[name])
         out[name]["fold_mae_std"] = round(float(np.std(fold_mae[name], ddof=1)), 4)
-        out[name]["per_year_mae"] = {int(y): round(float(ml.mae(laps.loc[laps["Year"] == y, "delta"], oof[name][(laps["Year"] == y).values])), 4) for y in sorted(laps["Year"].unique())}
+        out[name]["per_year_mae"] = {int(y): round(float(models.mae(laps.loc[laps["Year"] == y, "delta"], oof[name][(laps["Year"] == y).values])), 4) for y in sorted(laps["Year"].unique())}
     return out
 
 
@@ -107,7 +106,7 @@ def leave_one_year_out(laps):
         out[int(year)] = {}
         for tier in config.TIERS:
             pred = models.fit_gb(train, config.TIERS[tier], tier).predict(test[config.TIERS[tier]])
-            out[int(year)][f"gb_{tier}"] = {"mae_s": round(float(ml.mae(test["delta"], pred)), 4), "r2": round(float(ml.r2(test["delta"], pred)), 4)}
+            out[int(year)][f"gb_{tier}"] = {"mae_s": round(float(models.mae(test["delta"], pred)), 4), "r2": round(float(models.r2(test["delta"], pred)), 4)}
         print("leave-one-year-out", year, flush=True)
     return out
 
@@ -124,16 +123,16 @@ def sanity_checks(train, test, preds, fitted):
     shuffled = train.copy()
     shuffled["delta"] = np.random.RandomState(SEED).permutation(train["delta"].values)
     shuffle_pred = models.fit_gb(shuffled, cols, "pre_lap").predict(test[cols])
-    out = {"label_shuffle": {"mae_s": round(float(ml.mae(test["delta"], shuffle_pred)), 4), "r2": round(float(ml.r2(test["delta"], shuffle_pred)), 4)}}
+    out = {"label_shuffle": {"mae_s": round(float(models.mae(test["delta"], shuffle_pred)), 4), "r2": round(float(models.r2(test["delta"], shuffle_pred)), 4)}}
     out["train_vs_test"] = {}
     for tier in config.TIERS:
         train_pred = fitted[tier].predict(train[config.TIERS[tier]])
-        out["train_vs_test"][tier] = {"train_mae_s": round(float(ml.mae(train["delta"], train_pred)), 4), "test_mae_s": round(float(ml.mae(test["delta"], preds[f"gb_{tier}"])), 4)}
-    out["ablation_pre_lap_test_mae_s"] = {"all_features": round(float(ml.mae(test["delta"], preds["gb_pre_lap"])), 4)}
+        out["train_vs_test"][tier] = {"train_mae_s": round(float(models.mae(train["delta"], train_pred)), 4), "test_mae_s": round(float(models.mae(test["delta"], preds[f"gb_{tier}"])), 4)}
+    out["ablation_pre_lap_test_mae_s"] = {"all_features": round(float(models.mae(test["delta"], preds["gb_pre_lap"])), 4)}
     for group, group_cols in config.FEATURE_GROUPS.items():
         kept = [c for c in cols if c not in group_cols]
         pred = models.fit_gb(train, kept, "pre_lap").predict(test[kept])
-        out["ablation_pre_lap_test_mae_s"][f"drop_{group}"] = round(float(ml.mae(test["delta"], pred)), 4)
+        out["ablation_pre_lap_test_mae_s"][f"drop_{group}"] = round(float(models.mae(test["delta"], pred)), 4)
         print("ablation", group, flush=True)
     return out
 

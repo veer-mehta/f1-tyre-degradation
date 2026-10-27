@@ -1,13 +1,70 @@
 import numpy as np
 import pandas as pd
-from f1tyre import numpy_ml as ml
+from f1tyre.gradient_boosting import GradientBoosting
 from f1tyre.config import GB_PARAMS
+
+
+def mae(y, pred):
+    return float(np.mean(np.abs(np.asarray(y) - np.asarray(pred))))
+
+
+def median_ae(y, pred):
+    return float(np.median(np.abs(np.asarray(y) - np.asarray(pred))))
+
+
+def rmse(y, pred):
+    return float(np.sqrt(np.mean((np.asarray(y) - np.asarray(pred)) ** 2)))
+
+
+def r2(y, pred):
+    y = np.asarray(y, dtype=float)
+    ss_res = np.sum((y - np.asarray(pred)) ** 2)
+    ss_tot = np.sum((y - y.mean()) ** 2)
+    return float(1.0 - ss_res / ss_tot)
+
+
+def ols_fit(x, y):
+    x = np.asarray(x, dtype=float)
+    design = np.column_stack([x, np.ones(len(x))])
+    coef = np.linalg.lstsq(design, np.asarray(y, dtype=float), rcond=None)[0]
+    return coef
+
+
+def ols_predict(coef, x):
+    x = np.asarray(x, dtype=float)
+    return x @ coef[:-1] + coef[-1]
+
+
+class RidgeRegression:
+    def __init__(self, alpha=10.0):
+        self.alpha = alpha
+
+    def fit(self, x, y):
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        if x.ndim != 2 or len(x) != len(y):
+            raise ValueError("x must be 2-D with one row per target value")
+        self.mean_ = np.nanmean(x, axis=0)
+        self.std_ = np.nanstd(x, axis=0)
+        self.std_[self.std_ == 0] = 1.0
+        z = self._standardize(x)
+        self.intercept_ = y.mean()
+        gram = z.T @ z + self.alpha * np.eye(z.shape[1])
+        self.coef_ = np.linalg.solve(gram, z.T @ (y - self.intercept_))
+        return self
+
+    def _standardize(self, x):
+        z = (np.asarray(x, dtype=float) - self.mean_) / self.std_
+        return np.nan_to_num(z, nan=0.0)
+
+    def predict(self, x):
+        return self._standardize(x) @ self.coef_ + self.intercept_
 
 
 def make_gb(tier, **overrides):
     params = dict(GB_PARAMS["live" if tier == "live" else "pre_lap"])
     params.update(overrides)
-    return ml.GradientBoosting(**params)
+    return GradientBoosting(**params)
 
 
 def fit_gb(train, cols, tier, alpha=0.5):
@@ -69,8 +126,8 @@ def fit_formulas(train, test, fuel_total_s):
     abr_test = abrasiveness(test, race_slope, False)
     preds = {}
     for name, full in [("formula_a_calculator_style", False), ("formula_b_with_fuel_and_form", True)]:
-        coef = ml.ols_fit(formula_features(train, abr_train, full).values, train["delta"].values)
-        preds[name] = ml.ols_predict(coef, formula_features(test, abr_test, full).values)
+        coef = ols_fit(formula_features(train, abr_train, full).values, train["delta"].values)
+        preds[name] = ols_predict(coef, formula_features(test, abr_test, full).values)
     return preds
 
 

@@ -7,7 +7,7 @@ Contents:
 0. The project in two minutes
 1. Background: F1 and the vocabulary
 2. README and the results: how to read the numbers
-3. `f1tyre/numpy_ml.py`: the machine learning written from scratch
+3. `f1tyre/gradient_boosting.py` and `f1tyre/models.py`: the machine learning written from scratch
 4. `f1tyre/features.py`: from raw laps to features, and how leakage is prevented
 5. `f1tyre/models.py`: fuel effect, baselines, prediction intervals
 6. `f1tyre/degradation.py`: the within-stint degradation model
@@ -91,7 +91,7 @@ A single lap has about 0.33 s of unavoidable randomness (traffic, small mistakes
 
 ---
 
-## 3. `f1tyre/numpy_ml.py`: the machine learning from scratch
+## 3. `f1tyre/gradient_boosting.py` and `f1tyre/models.py`: the machine learning from scratch
 
 215 lines. This is the heart of the "implemented from scratch" requirement. Read it top to bottom.
 
