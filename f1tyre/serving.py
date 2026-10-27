@@ -1,10 +1,9 @@
 import gzip
-import json
 import pickle
 import numpy as np
 import pandas as pd
-from f1tyre import degradation, features, models
-from f1tyre.config import COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO, RESULTS_DIR, ROOT, TIERS
+from f1tyre import features, models
+from f1tyre.config import COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO, ROOT, TIERS
 
 
 CACHE_PATH = ROOT / "cached" / "app.pkl.gz"
@@ -106,13 +105,6 @@ def example_rows(laps):
     return stint_laps[["LapNumber", "LapTime", "Compound", "TyreLife", "TrackTemp"]].round(3).reset_index(drop=True), overrides
 
 
-def stint_spread(model, circuits, panel):
-    predicted = pd.Series(model.predict_within(panel, circuits), index=panel.index)
-    gap = degradation.stint_slopes(panel["y"], panel) - degradation.stint_slopes(predicted, panel)
-    compound = panel.groupby(degradation.STINT_KEY)["Compound"].first()
-    return {c: (float(gap[compound == c].quantile(0.1)), float(gap[compound == c].quantile(0.9))) for c in COMPOUNDS}
-
-
 def verify_scores(verify):
     x, y = verify["x"], verify["y"]
     preds = {"Median baseline": np.full(len(y), verify["median"]), "Persistence (last 3 laps)": x["prev3_delta"].fillna(verify["median"]).to_numpy()}
@@ -123,14 +115,10 @@ def verify_scores(verify):
 
 def build():
     laps = features.build_lap_table(features.load_laps())
+    circuits = features.load_circuits()
     train, test = features.split_years(laps)
     verify = {"models": {tier: models.fit_gb(train, TIERS[tier], tier) for tier in SERVED_TIERS}, "x": test[TIERS["live"]].reset_index(drop=True), "y": test["delta"].to_numpy(), "median": float(train["delta"].median())}
-    circuits = features.load_circuits()
-    report = json.loads((RESULTS_DIR / "degradation.json").read_text())
-    fuel_total_s = models.estimate_fuel_effect(laps)
-    panel = degradation.build_panel(laps, fuel_total_s)
-    model = degradation.model_from_report(report).fit(panel, circuits)
-    return {"degradation": model, "circuits": circuits, "selected": report["final_model"]["circuit_columns"], "draws": pd.read_csv(RESULTS_DIR / "degradation_bootstrap.csv"), "totals": laps.groupby("EventName")["TotalLaps"].max().to_dict(), "fuel_total_s": fuel_total_s, "panel": panel, "spread": stint_spread(model, circuits, panel), "served": {tier: models.fit_gb(laps, TIERS[tier], tier) for tier in SERVED_TIERS}, "defaults": reference_defaults(laps, circuits), "example": example_rows(laps), "verify": verify}
+    return {"circuits": circuits, "served": {tier: models.fit_gb(laps, TIERS[tier], tier) for tier in SERVED_TIERS}, "defaults": reference_defaults(laps, circuits), "example": example_rows(laps), "verify": verify}
 
 
 def refresh():
