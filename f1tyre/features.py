@@ -1,8 +1,8 @@
 """Feature table: one row per clean lap, with the target and every model feature."""
 import numpy as np
 import pandas as pd
-from f1tyre.config import COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO
-from f1tyre.data import clean_laps, race_key
+from f1tyre.config import CIRCUIT_FEATURES, COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO, PRE_STINT_FEATURES
+from f1tyre.data import clean_laps, load_circuits, race_key
 
 
 def add_form(laps, key, window, name):
@@ -34,6 +34,21 @@ def add_field_context(laps, raw):
     return laps
 
 
+def add_stint_history(laps):
+    key = ["race_id", "Driver"]
+    ordered = laps.sort_values(key + ["Stint", "LapNumber"])
+    summary = ordered.groupby(key + ["Stint"], as_index=False).agg(n=("delta", "size"), total=("delta", "sum"))
+    summary["last3"] = ordered.groupby(key + ["Stint"])["delta"].apply(lambda s: s.tail(3).mean()).to_numpy()
+    summary = summary.sort_values(key + ["Stint"]).reset_index(drop=True)
+    by_race = summary.groupby(key)
+    earlier_n = by_race["n"].cumsum() - summary["n"]
+    summary["race_mean_delta_before"] = ((by_race["total"].cumsum() - summary["total"]) / earlier_n.replace(0, np.nan))
+    summary["prev_stint_mean_delta"] = (summary["total"] / summary["n"]).groupby([summary[k] for k in key]).shift(1)
+    summary["prev_stint_last3_delta"] = by_race["last3"].shift(1)
+    summary["prev_stint_laps"] = by_race["n"].shift(1)
+    return laps.merge(summary[key + ["Stint"] + PRE_STINT_FEATURES], on=key + ["Stint"], how="left")
+
+
 def build_lap_table(raw):
     laps = clean_laps(raw)
     laps["order"] = laps["Year"] * 100 + laps["Round"]
@@ -48,6 +63,8 @@ def build_lap_table(raw):
         laps[col] = laps[col].fillna(NEUTRAL_PACE_RATIO)
     for col in ["driver_form", "driver_form_3", "driver_form_10"]:
         laps[col] = laps[col].fillna(laps[col.replace("driver", "team")])
+    laps = laps.merge(load_circuits()[CIRCUIT_FEATURES].reset_index(), on="EventName", how="left")
+    laps = add_stint_history(laps)
     laps = laps.sort_values(["race_id", "Driver", "Stint", "LapNumber"]).reset_index(drop=True)
     stint = laps.groupby(["race_id", "Driver", "Stint"])
     laps["prev_delta"] = stint["delta"].shift(1)
@@ -76,26 +93,3 @@ def build_lap_table(raw):
         laps[f"compound_{compound.lower()}"] = flag
         laps[f"age_x_{compound.lower()}"] = flag * laps["TyreLife"]
     return laps
-
-
-def what_if_rows(laps, event, compound, track_temp, air_temp, start_lap=10, dirty_air=False, max_age=30):
-    total_laps = int(laps.loc[laps["EventName"] == event, "TotalLaps"].max())
-    age = np.arange(1, max_age + 1)
-    lap_number = start_lap + age
-    rows = pd.DataFrame({"tyre_life": age, "lap_number": lap_number, "race_fraction": lap_number / total_laps, "stint": 2, "track_temp": track_temp, "air_temp": air_temp, "humidity": laps["humidity"].median(), "wind_speed": laps["wind_speed"].median(), "temp_gap": track_temp - air_temp, "fresh_tyre": 1.0})
-    rows["tyre_life_sq"] = age ** 2
-    rows["tyre_life_log"] = np.log1p(age)
-    rows["age_le2"] = (age <= 2).astype(float)
-    for c in COMPOUNDS:
-        rows[f"compound_{c.lower()}"] = float(c == compound)
-        rows[f"age_x_{c.lower()}"] = float(c == compound) * age
-    for col in ["driver_form", "team_form", "driver_form_3", "driver_form_10", "team_form_3", "team_form_10"]:
-        rows[col] = laps[col].median()
-    gap = 0.8 if dirty_air else 10.0
-    rows["gap_ahead_prev"] = rows["gap_ahead_prev2"] = gap
-    rows["gap_behind_prev"] = 10.0
-    rows["position_prev"] = 10.0
-    rows["dirty_air_prev"] = float(dirty_air)
-    rows["field_vs_cum"] = laps["field_vs_cum"].median()
-    rows["laps_since_neutral"] = 40.0
-    return rows, total_laps

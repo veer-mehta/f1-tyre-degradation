@@ -28,3 +28,7 @@ def split_years(laps):
     train = laps[laps["Year"].isin(TRAIN_YEARS)].reset_index(drop=True)
     test = laps[laps["Year"].isin(TEST_YEARS)].reset_index(drop=True)
     return train, test
+
+
+def load_circuits():
+    return pd.read_csv(DATA_DIR / "circuits.csv").set_index("EventName")

@@ -1,4 +1,4 @@
-"""Machine learning implemented from scratch with NumPy: metrics, least squares, ridge regression and gradient-boosted trees."""
+"""Machine learning implemented from scratch with NumPy: metrics, least squares, ridge regression and gradient boosting."""
 import numpy as np
 
 
@@ -94,7 +94,7 @@ class Tree:
         return self.value[node]
 
 
-class GradientBoostedTrees:
+class GradientBoosting:
     """Gradient boosting with pinball loss (alpha=0.5 is least absolute deviation).
 
     Each round: compute the negative gradient of the pinball loss, grow a

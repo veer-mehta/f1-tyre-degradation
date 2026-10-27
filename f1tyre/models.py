@@ -2,18 +2,17 @@
 import numpy as np
 import pandas as pd
 from f1tyre import numpy_ml as ml
-from f1tyre.config import COMPOUNDS, GBT_PARAMS, TIERS
-from f1tyre.features import what_if_rows
+from f1tyre.config import GB_PARAMS
 
 
-def make_gbt(tier, **overrides):
-    params = dict(GBT_PARAMS["live" if tier == "live" else "pre_lap"])
+def make_gb(tier, **overrides):
+    params = dict(GB_PARAMS["live" if tier == "live" else "pre_lap"])
     params.update(overrides)
-    return ml.GradientBoostedTrees(**params)
+    return ml.GradientBoosting(**params)
 
 
-def fit_gbt(train, cols, tier, alpha=0.5):
-    return make_gbt(tier, alpha=alpha).fit(train[cols].values, train["delta"].values)
+def fit_gb(train, cols, tier, alpha=0.5):
+    return make_gb(tier, alpha=alpha).fit(train[cols].values, train["delta"].values)
 
 
 def estimate_fuel_effect(train):
@@ -82,8 +81,8 @@ def conformal_interval(train, test, cols, tier, alpha=0.1, seed=42):
     calib_races = rng.choice(races, size=int(0.2 * len(races)), replace=False)
     is_calib = train["race_id"].isin(calib_races)
     fit, calib = train[~is_calib], train[is_calib]
-    lower = fit_gbt(fit, cols, tier, alpha=alpha / 2)
-    upper = fit_gbt(fit, cols, tier, alpha=1 - alpha / 2)
+    lower = fit_gb(fit, cols, tier, alpha=alpha / 2)
+    upper = fit_gb(fit, cols, tier, alpha=1 - alpha / 2)
     lo_c, hi_c = lower.predict(calib[cols]), upper.predict(calib[cols])
     scores = np.maximum(lo_c - calib["delta"].values, calib["delta"].values - hi_c)
     level = min(1.0, np.ceil((len(scores) + 1) * (1 - alpha)) / len(scores))
@@ -93,13 +92,3 @@ def conformal_interval(train, test, cols, tier, alpha=0.1, seed=42):
     raw_cov = float(((y >= lo) & (y <= hi)).mean())
     cal_cov = float(((y >= lo - q) & (y <= hi + q)).mean())
     return {"target_coverage": 1 - alpha, "raw_coverage": round(raw_cov, 4), "calibrated_coverage": round(cal_cov, 4), "calibrated_mean_width_s": round(float((hi - lo + 2 * q).mean()), 4)}
-
-
-def predict_degradation(model, laps, fuel_total_s, event, track_temp, air_temp, start_lap=10, dirty_air=False):
-    curves = []
-    for compound in COMPOUNDS:
-        rows, total_laps = what_if_rows(laps, event, compound, track_temp, air_temp, start_lap, dirty_air)
-        raw = model.predict(rows[TIERS["pre_lap"]])
-        pred = raw + fuel_total_s * rows["lap_number"].values / total_laps
-        curves.append(pd.DataFrame({"compound": compound.title(), "age": rows["tyre_life"].values, "loss": pred - pred[2:4].mean(), "pace": raw}))
-    return pd.concat(curves, ignore_index=True)
