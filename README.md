@@ -49,27 +49,27 @@ Full tables, bootstrap intervals and ablations: `results/summary.md` and `report
 
 ```
 pip install -r requirements.txt
-python -m unittest discover -s tests -t .   # tests, including a no-future-leakage check
-streamlit run app.py                        # the app
-python train_models.py                      # refit the saved lap-time models in models/ (about one minute)
-python evaluate.py                          # lap-level scores (about 10 minutes)
-python evaluate_degradation.py              # degradation model and circuit analysis
-python predict_demo.py "Bahrain Grand Prix" 35
+streamlit run app.py          # the app, loads saved models from artifacts/ in about two seconds
+python evaluate.py            # lap-level scores (about 10 minutes)
+python evaluate_degradation.py   # degradation model and circuit analysis (about 2 minutes)
+python build_app.py           # refit and save everything the app loads (about one minute)
 ```
 
-The data is in `data/`, so no F1 account is needed. To download it again, install `fastf1`, copy `.env.example` to `.env`, add an F1 account and run `python fetch_data.py` then `python fetch_circuits.py`.
+Run `evaluate_degradation.py` before `build_app.py`. The data is in `data/`, so no F1 account is needed. To download it again, install `fastf1`, copy `.env.example` to `.env`, add an F1 account and run `python fetch_data.py`, then `python fetch_data.py circuits` for the circuit characteristics.
 
 ## Layout
 
 ```
-app.py, evaluate*.py, predict_demo.py, fetch_*.py
-f1tyre/      config, data, features, circuits, degradation, lapmodel, numpy_ml, models, metrics
-tests/       unit tests
-models/      saved pre-lap and live gradient boosting models used by the app
-data/        race laps (92 CSVs) and circuits.csv
-results/     metrics, figures, summary
-report/      report.pdf and editable report.docx, with build scripts
-reference_sklearn_xgboost/   earlier scikit-learn and XGBoost version, for comparison
+app.py                      Streamlit app
+build_app.py                trains and saves the models and data the app loads
+evaluate.py                 lap-level evaluation
+evaluate_degradation.py     degradation model and circuit analysis
+fetch_data.py               downloads laps and circuit characteristics from FastF1
+f1tyre/                     config, features, models, numpy_ml, degradation, serving
+artifacts/                  saved models and data for the app
+data/                       race laps (92 CSVs) and circuits.csv
+results/                    metrics, figures, summary
+report/                     report.pdf and editable report.docx, with build scripts
 ```
 
 Lap data comes from FastF1 (Formula 1 timing data). Keep the repository private.

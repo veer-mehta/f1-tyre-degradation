@@ -1,7 +1,3 @@
-"""Evaluates the tyre degradation model and relates circuit characteristics to degradation.
-
-Writes results/degradation.json and figures to results/. Needs data/circuits.csv (fetch_circuits.py).
-"""
 import json
 import numpy as np
 import pandas as pd
@@ -9,8 +5,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from f1tyre import config, data, features, models
-from f1tyre.circuits import DESCRIPTOR_LABELS
+from f1tyre import config, features, models
+from f1tyre.config import DESCRIPTOR_LABELS
 from f1tyre import degradation as dg
 from f1tyre import numpy_ml as ml
 
@@ -123,9 +119,9 @@ def plot_descriptor_correlations(correlations, selected, path):
 
 
 def main():
-    laps = features.build_lap_table(data.load_laps())
-    circuits = data.load_circuits()
-    train, test = data.split_years(laps)
+    laps = features.build_lap_table(features.load_laps())
+    circuits = features.load_circuits()
+    train, test = features.split_years(laps)
     fuel_total_s = models.estimate_fuel_effect(train)
     ptrain, ptest = dg.build_panel(train, fuel_total_s), dg.build_panel(test, fuel_total_s)
     panel_all = dg.build_panel(laps, fuel_total_s)
@@ -177,7 +173,6 @@ def main():
         print(name, {k: v for k, v in result.items() if k != "mean_slope_by_compound"}, result["mean_slope_by_compound"], flush=True)
 
     check = dg.curve_table(selected_model, ptest, circuits, min_n=15)
-    check.to_csv(RESULTS_DIR / "curve_check.csv", index=False)
     report["curve_check_2025"] = {"mean_abs_error_s": round(float((check["actual"] - check["predicted"]).abs().mean()), 4), "points": int(len(check)), "by_shape_2025": {name: round(dg.curve_fidelity(dg.DegradationModel(alpha=100.0, **kw).fit(ptrain), ptest), 4) for name, kw in SHAPE_CANDIDATES.items()}}
     plot_curve_check(check, RESULTS_DIR / "curve_check.png")
     final = dg.DegradationModel(selected, alpha=100.0, **shape).fit(panel_all, circuits)

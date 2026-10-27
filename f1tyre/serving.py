@@ -1,43 +1,15 @@
-"""Lap-time prediction from user-entered laps: saved gradient boosting models, feature building and defaults.
-
-The models predict a lap relative to the race's field-median lap, so a race median lap time is needed to turn
-a prediction into seconds. Inputs the user does not give (weather, traffic, driver form) take neutral defaults.
-"""
+import gzip
+import json
 import pickle
 import numpy as np
 import pandas as pd
-from f1tyre import models as fitted_models
-from f1tyre.config import COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO, ROOT, TIERS
+from f1tyre import degradation, features, models
+from f1tyre.config import COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO, RESULTS_DIR, ROOT, TIERS
 
 
-MODEL_DIR = ROOT / "models"
+ARTIFACT_PATH = ROOT / "artifacts" / "app.pkl.gz"
 SERVED_TIERS = ["pre_lap", "live"]
-NO_GAP_S = 60.0
 NO_NEUTRAL_LAPS = 40.0
-
-
-def model_path(tier):
-    return MODEL_DIR / f"gb_{tier}.pkl"
-
-
-def train_and_save(laps):
-    MODEL_DIR.mkdir(exist_ok=True)
-    out = {}
-    for tier in SERVED_TIERS:
-        out[tier] = fitted_models.fit_gb(laps, TIERS[tier], tier)
-        with open(model_path(tier), "wb") as f:
-            pickle.dump(out[tier], f)
-    return out
-
-
-def load_models(laps=None):
-    if all(model_path(t).exists() for t in SERVED_TIERS):
-        out = {}
-        for tier in SERVED_TIERS:
-            with open(model_path(tier), "rb") as f:
-                out[tier] = pickle.load(f)
-        return out
-    return train_and_save(laps)
 
 
 def reference_defaults(laps, circuits):
@@ -120,5 +92,50 @@ def build_features(rows, settings, climb, defaults):
     return rows, out[TIERS["live"]]
 
 
-def predict_laps(served, features, median_s):
-    return {tier: served[tier].predict(features[TIERS[tier]].to_numpy()) + median_s for tier in SERVED_TIERS}
+def predict_laps(served, built, median_s):
+    return {tier: served[tier].predict(built[TIERS[tier]].to_numpy()) + median_s for tier in SERVED_TIERS}
+
+
+def example_rows(laps):
+    latest = laps[laps["Year"] == laps["Year"].max()]
+    sub = latest[latest["EventName"] == "Bahrain Grand Prix"]
+    sub = sub if len(sub) else latest
+    driver, stint = sub.groupby(["Driver", "Stint"]).size().idxmax()
+    stint_laps = sub[(sub["Driver"] == driver) & (sub["Stint"] == stint)].sort_values("LapNumber")
+    overrides = {"stint": int(stint), "driver_ratio": float(stint_laps["driver_form"].iloc[0]), "position": int(round(stint_laps["position_prev"].mean())), "gap_ahead_s": float(stint_laps["gap_ahead_prev"].mean()), "gap_behind_s": float(stint_laps["gap_behind_prev"].mean()), "field_vs_cum": float(stint_laps["field_vs_cum"].mean()), "laps_since_neutral": float(stint_laps["laps_since_neutral"].mean()), "air_temp": float(stint_laps["air_temp"].mean()), "humidity": float(stint_laps["humidity"].mean()), "wind_speed": float(stint_laps["wind_speed"].mean()), "fresh_tyre": bool(stint_laps["fresh_tyre"].iloc[0] > 0.5)}
+    return stint_laps[["LapNumber", "LapTime", "Compound", "TyreLife", "TrackTemp"]].round(3).reset_index(drop=True), overrides
+
+
+def stint_spread(model, circuits, panel):
+    predicted = pd.Series(model.predict_within(panel, circuits), index=panel.index)
+    gap = degradation.stint_slopes(panel["y"], panel) - degradation.stint_slopes(predicted, panel)
+    compound = panel.groupby(degradation.STINT_KEY)["Compound"].first()
+    return {c: (float(gap[compound == c].quantile(0.1)), float(gap[compound == c].quantile(0.9))) for c in COMPOUNDS}
+
+
+def build():
+    laps = features.build_lap_table(features.load_laps())
+    circuits = features.load_circuits()
+    report = json.loads((RESULTS_DIR / "degradation.json").read_text())
+    fuel_total_s = models.estimate_fuel_effect(laps)
+    panel = degradation.build_panel(laps, fuel_total_s)
+    model = degradation.model_from_report(report).fit(panel, circuits)
+    return {"degradation": model, "circuits": circuits, "selected": report["final_model"]["circuit_columns"], "draws": pd.read_csv(RESULTS_DIR / "degradation_bootstrap.csv"), "totals": laps.groupby("EventName")["TotalLaps"].max().to_dict(), "fuel_total_s": fuel_total_s, "panel": panel, "spread": stint_spread(model, circuits, panel), "served": {tier: models.fit_gb(laps, TIERS[tier], tier) for tier in SERVED_TIERS}, "defaults": reference_defaults(laps, circuits), "example": example_rows(laps)}
+
+
+def refresh():
+    artifacts = build()
+    ARTIFACT_PATH.parent.mkdir(exist_ok=True)
+    with gzip.open(ARTIFACT_PATH, "wb") as f:
+        pickle.dump(artifacts, f)
+    return artifacts
+
+
+def load():
+    if ARTIFACT_PATH.exists():
+        try:
+            with gzip.open(ARTIFACT_PATH, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    return refresh()

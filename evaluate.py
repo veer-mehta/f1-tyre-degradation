@@ -7,7 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from f1tyre import numpy_ml as ml
-from f1tyre import config, data, features, metrics, models
+from f1tyre import config, features, models
 
 
 RESULTS_DIR = config.RESULTS_DIR
@@ -15,6 +15,39 @@ N_FOLDS = 5
 N_BOOTSTRAP = 1000
 SEED = 42
 MODEL_ORDER = ["median_baseline", "persistence_last3_laps", "formula_a_calculator_style", "formula_b_with_fuel_and_form", "ridge_pre_lap_features", "gb_pre_lap", "gb_pre_stint", "gb_live"]
+
+
+def curve_error(test, pred, max_age=30, min_n=30):
+    d = test[["Compound", "TyreLife", "delta"]].assign(pred=pred)
+    errors = []
+    for compound in config.COMPOUNDS:
+        sub = d[(d["Compound"] == compound) & (d["TyreLife"] <= max_age)]
+        g = sub.groupby("TyreLife").agg(actual=("delta", "mean"), pred=("pred", "mean"), n=("delta", "size"))
+        g = g[g["n"] >= min_n]
+        errors.append((g["actual"] - g["pred"]).abs())
+    return float(pd.concat(errors).mean())
+
+
+def stint_slopes(test, pred, fuel_total_s, min_laps=15):
+    d = test[["race_id", "Driver", "Stint", "TyreLife", "delta", "LapNumber", "TotalLaps"]].assign(pred=pred)
+    fuel = fuel_total_s * d["LapNumber"] / d["TotalLaps"]
+    d["true_fc"] = d["delta"] + fuel
+    d["pred_fc"] = d["pred"] + fuel
+    rows = []
+    for _, g in d.groupby(["race_id", "Driver", "Stint"]):
+        if len(g) >= min_laps and g["TyreLife"].nunique() >= min_laps - 2:
+            rows.append((np.polyfit(g["TyreLife"], g["true_fc"], 1)[0], np.polyfit(g["TyreLife"], g["pred_fc"], 1)[0]))
+    return np.array(rows)
+
+
+def score(test, pred, fuel_total_s=None):
+    y = test["delta"].values
+    out = {"mae_s": ml.mae(y, pred), "median_ae_s": ml.median_ae(y, pred), "rmse_s": ml.rmse(y, pred), "r2": ml.r2(y, pred), "curve_mae_s": curve_error(test, pred)}
+    if fuel_total_s is not None:
+        s = stint_slopes(test, pred, fuel_total_s)
+        out["slope_mae_s_per_lap"] = float(np.abs(s[:, 0] - s[:, 1]).mean())
+        out["slope_corr"] = float(np.corrcoef(s[:, 0], s[:, 1])[0, 1]) if np.std(s[:, 1]) > 0 else 0.0
+    return {k: round(float(v), 4) for k, v in out.items()}
 
 
 def assign_folds(laps):
@@ -43,7 +76,7 @@ def predict_all(train, test):
 
 def holdout(train, test):
     preds, fitted, fuel_total_s = predict_all(train, test)
-    scores = {name: metrics.score(test, preds[name], fuel_total_s) for name in MODEL_ORDER}
+    scores = {name: score(test, preds[name], fuel_total_s) for name in MODEL_ORDER}
     return scores, preds, fitted, fuel_total_s
 
 
@@ -60,7 +93,7 @@ def mixed_year_cv(laps):
         print("mixed-year fold", fold, flush=True)
     out = {}
     for name in MODEL_ORDER:
-        out[name] = metrics.score(laps, oof[name])
+        out[name] = score(laps, oof[name])
         out[name]["fold_mae_std"] = round(float(np.std(fold_mae[name], ddof=1)), 4)
         out[name]["per_year_mae"] = {int(y): round(float(ml.mae(laps.loc[laps["Year"] == y, "delta"], oof[name][(laps["Year"] == y).values])), 4) for y in sorted(laps["Year"].unique())}
     return out
@@ -83,7 +116,7 @@ def later_stints(test, preds):
     mask = (test["stint"] >= 2).to_numpy()
     subset = test[mask].reset_index(drop=True)
     names = ["median_baseline", "persistence_last3_laps", "gb_pre_lap", "gb_pre_stint", "gb_live"]
-    return {"share_of_test_laps": round(float(mask.mean()), 4), "scores": {name: metrics.score(subset, preds[name][mask]) for name in names}}
+    return {"share_of_test_laps": round(float(mask.mean()), 4), "scores": {name: score(subset, preds[name][mask]) for name in names}}
 
 
 def sanity_checks(train, test, preds, fitted):
@@ -123,7 +156,7 @@ def race_bootstrap(test, preds):
     return {"mae_ci95": ci, "gain_over_formula_b": gain}
 
 
-def plot_results(test, preds, fitted, fuel_total_s):
+def plot_results(test, preds, fuel_total_s):
     fig, axes = plt.subplots(1, len(config.TIERS), figsize=(5.4 * len(config.TIERS), 5))
     for ax, tier in zip(axes, config.TIERS):
         ax.scatter(test["delta"], preds[f"gb_{tier}"], s=2, alpha=0.15)
@@ -134,28 +167,19 @@ def plot_results(test, preds, fitted, fuel_total_s):
     plt.close(fig)
     fuel = fuel_total_s * test["LapNumber"] / test["TotalLaps"]
     fig, axes = plt.subplots(1, 3, figsize=(14, 4), sharey=True)
-    frames = []
     for ax, compound in zip(axes, config.COMPOUNDS):
         mask = ((test["Compound"] == compound) & (test["TyreLife"] <= 30)).values
         d = pd.DataFrame({"age": test.loc[mask, "TyreLife"].values, "actual": test.loc[mask, "delta"].values + fuel[mask].values, "pre_lap": preds["gb_pre_lap"][mask] + fuel[mask].values, "live": preds["gb_live"][mask] + fuel[mask].values})
         g = d.groupby("age").mean()
         g = g - g.loc[2:4].mean()
-        frames.append(g.reset_index().assign(compound=compound.title()))
         for col, style in [("actual", "-"), ("pre_lap", "--"), ("live", ":")]:
             ax.plot(g.index, g[col], style, lw=2, label=col)
         ax.set(title=compound, xlabel="Tyre age (laps)")
-    pd.concat(frames).to_csv(f"{RESULTS_DIR}/degradation_curves.csv", index=False)
     axes[0].set_ylabel("Fuel-corrected lap time loss vs age 2-4 (s)")
     axes[0].legend()
     fig.suptitle("Tyre-age curves on unseen 2025 races")
     fig.tight_layout()
     fig.savefig(f"{RESULTS_DIR}/degradation_curves.png", dpi=150)
-    plt.close(fig)
-    importance = pd.Series(fitted["live"].feature_importances_, index=config.TIERS["live"]).sort_values()
-    fig, ax = plt.subplots(figsize=(7, 8))
-    importance.plot.barh(ax=ax, title="Gradient boosting feature importance (live model)")
-    fig.tight_layout()
-    fig.savefig(f"{RESULTS_DIR}/feature_importance.png", dpi=150)
     plt.close(fig)
 
 
@@ -181,8 +205,8 @@ def write_summary(report):
 
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    laps = features.build_lap_table(data.load_laps())
-    train, test = data.split_years(laps)
+    laps = features.build_lap_table(features.load_laps())
+    train, test = features.split_years(laps)
     print(f"clean laps {len(laps)}, races {laps['race_id'].nunique()}, train {len(train)}, test {len(test)}", flush=True)
     scores, preds, fitted, fuel_total_s = holdout(train, test)
     report = {"fuel_effect_total_s_fitted": round(fuel_total_s, 3), "holdout_2025": scores}
@@ -196,7 +220,7 @@ def main():
     with open(f"{RESULTS_DIR}/metrics.json", "w") as f:
         json.dump(report, f, indent=2)
     write_summary(report)
-    plot_results(test, preds, fitted, fuel_total_s)
+    plot_results(test, preds, fuel_total_s)
     print("done", flush=True)
 
 

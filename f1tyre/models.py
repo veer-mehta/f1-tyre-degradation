@@ -1,4 +1,3 @@
-"""Model construction, fitted baselines, conformal intervals and what-if curves."""
 import numpy as np
 import pandas as pd
 from f1tyre import numpy_ml as ml

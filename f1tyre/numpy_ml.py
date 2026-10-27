@@ -1,4 +1,3 @@
-"""Machine learning implemented from scratch with NumPy: metrics, least squares, ridge regression and gradient boosting."""
 import numpy as np
 
 
@@ -95,13 +94,6 @@ class Tree:
 
 
 class GradientBoosting:
-    """Gradient boosting with pinball loss (alpha=0.5 is least absolute deviation).
-
-    Each round: compute the negative gradient of the pinball loss, grow a
-    histogram regression tree on it (variance-reduction splits), then set each
-    leaf to the alpha-quantile of the current residuals in that leaf (exact line
-    search for the pinball loss), scaled by the learning rate.
-    """
 
     def __init__(self, n_trees=200, max_depth=6, learning_rate=0.05, subsample=0.8, colsample=0.8, min_samples_leaf=20, reg_lambda=5.0, alpha=0.5, n_bins=64, seed=42):
         self.n_trees = n_trees
@@ -134,7 +126,6 @@ class GradientBoosting:
         n, n_features = binned.shape
         rng = np.random.RandomState(self.seed)
         self.base_ = float(np.quantile(y, self.alpha))
-        self.gain_ = np.zeros(n_features)
         self.trees_ = []
         pred = np.full(n, self.base_)
         n_cols = max(1, int(round(self.colsample * n_features)))
@@ -146,7 +137,6 @@ class GradientBoosting:
             tree = self._grow(binned[np.ix_(rows, cols)], grad[rows], residual[rows], cols)
             pred += tree.predict_binned(binned)
             self.trees_.append(tree)
-        self.feature_importances_ = self.gain_ / self.gain_.sum() if self.gain_.sum() > 0 else self.gain_
         return self
 
     def _best_split(self, xs, grad, offsets, n_total_bins):
@@ -184,7 +174,6 @@ class GradientBoosting:
                 value[node] = self.learning_rate * float(np.quantile(residual[idx], self.alpha))
                 continue
             local_feature, local_threshold, gain = split
-            self.gain_[cols[local_feature]] += gain
             goes_left = xs[idx, local_feature] <= local_threshold
             left_node = len(feature)
             right_node = left_node + 1

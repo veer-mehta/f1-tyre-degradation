@@ -3,8 +3,8 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from f1tyre import config, data, degradation, features, lapmodel, models
-from f1tyre.circuits import DESCRIPTOR_LABELS
+from f1tyre import config, degradation, serving
+from f1tyre.config import DESCRIPTOR_LABELS
 
 
 COMPOUND_COLORS = {"Soft": "#E10600", "Medium": "#FFD12E", "Hard": "#F2F2F2"}
@@ -47,17 +47,13 @@ def read_report():
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-@st.cache_resource(show_spinner="Fitting the degradation model on 2022-2025 races")
-def load_model():
-    laps = features.build_lap_table(data.load_laps())
-    circuits = data.load_circuits()
-    report = read_report()
-    panel = degradation.build_panel(laps, models.estimate_fuel_effect(laps))
-    model = degradation.model_from_report(report).fit(panel, circuits)
-    draws_path = config.RESULTS_DIR / "degradation_bootstrap.csv"
-    draws = pd.read_csv(draws_path) if draws_path.exists() else None
-    totals = laps.groupby("EventName")["TotalLaps"].max().to_dict()
-    return model, circuits, report["final_model"]["circuit_columns"], draws, totals, models.estimate_fuel_effect(laps), panel, laps
+@st.cache_resource(show_spinner="Loading the models")
+def load_artifacts():
+    return serving.load()
+
+
+def themed(chart, label_color="#8E8E93"):
+    return chart.configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor=label_color, titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E", labelFontSize=12, titleFontSize=12).configure_legend(labelColor="#F2F2F2")
 
 
 def label(text):
@@ -69,11 +65,9 @@ def chart(curves, y_title):
     x = alt.X("age:Q", title="Tyre age (laps)", scale=alt.Scale(domain=[1, MAX_AGE]))
     color = alt.Color("compound:N", scale=colors, legend=alt.Legend(orient="top", title=None, symbolType="stroke", symbolStrokeWidth=4, symbolOpacity=1, labelFontSize=13))
     line = alt.Chart(curves).mark_line(strokeWidth=3, interpolate="monotone").encode(x=x, y=alt.Y("loss:Q", title=y_title), color=color)
-    if "low" not in curves:
-        return line.properties(height=380).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E", labelFontSize=12, titleFontSize=12).configure_legend(labelColor="#F2F2F2")
     band = alt.Chart(curves).mark_area(opacity=0.14, interpolate="monotone").encode(x=x, y="low:Q", y2="high:Q", color=color)
     base = band + line
-    return base.properties(height=380).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E", labelFontSize=12, titleFontSize=12).configure_legend(labelColor="#F2F2F2")
+    return themed(base.properties(height=380))
 
 
 def card(compound, curves):
@@ -90,21 +84,6 @@ def circuit_profile(row, selected):
     return f'<div class="f1-stats">{blocks}</div>'
 
 
-@st.cache_resource(show_spinner="Loading the lap-time models")
-def load_lap_models(_laps):
-    return lapmodel.load_models(_laps)
-
-
-def example_rows(laps):
-    latest = laps[laps["Year"] == laps["Year"].max()]
-    sub = latest[latest["EventName"] == "Bahrain Grand Prix"]
-    sub = sub if len(sub) else latest
-    driver, stint = sub.groupby(["Driver", "Stint"]).size().idxmax()
-    stint_laps = sub[(sub["Driver"] == driver) & (sub["Stint"] == stint)].sort_values("LapNumber")
-    overrides = {"stint": int(stint), "driver_ratio": float(stint_laps["driver_form"].iloc[0]), "position": int(round(stint_laps["position_prev"].mean())), "gap_ahead_s": float(stint_laps["gap_ahead_prev"].mean()), "gap_behind_s": float(stint_laps["gap_behind_prev"].mean()), "field_vs_cum": float(stint_laps["field_vs_cum"].mean()), "laps_since_neutral": float(stint_laps["laps_since_neutral"].mean()), "air_temp": float(stint_laps["air_temp"].mean()), "humidity": float(stint_laps["humidity"].mean()), "wind_speed": float(stint_laps["wind_speed"].mean()), "fresh_tyre": bool(stint_laps["fresh_tyre"].iloc[0] > 0.5)}
-    return stint_laps[["LapNumber", "LapTime", "Compound", "TyreLife", "TrackTemp"]].round(3).reset_index(drop=True), overrides
-
-
 def prediction_chart(kept, result):
     colors = alt.Scale(domain=["Actual", "Pre-lap model", "Live model"], range=["#F2F2F2", "#8E8E93", "#E10600"])
     frames = [pd.DataFrame({"lap": kept["LapNumber"], "time": kept["LapTime"], "series": "Actual"}).dropna(), pd.DataFrame({"lap": kept["LapNumber"], "time": result["pre_lap"], "series": "Pre-lap model"}), pd.DataFrame({"lap": kept["LapNumber"], "time": result["live"], "series": "Live model"})]
@@ -114,7 +93,7 @@ def prediction_chart(kept, result):
     color = alt.Color("series:N", scale=colors, legend=alt.Legend(orient="top", title=None, symbolOpacity=1))
     lines = alt.Chart(long[long["series"] != "Actual"]).mark_line(strokeWidth=2.5).encode(x=x, y=y, color=color)
     dots = alt.Chart(long[long["series"] == "Actual"]).mark_circle(size=70, opacity=0.9).encode(x=x, y=y, color=color, tooltip=["lap", "time"])
-    return alt.layer(lines, dots).properties(height=320).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2")
+    return themed(alt.layer(lines, dots).properties(height=320))
 
 
 def result_table(kept, result):
@@ -131,17 +110,17 @@ def result_table(kept, result):
     return html + "</table>"
 
 
-def lap_time_tab(served, defaults, circuits, laps):
+def lap_time_tab(served, defaults, circuits, example_data):
     events = ["None"] + sorted(circuits.index)
     c1, c2 = st.columns([2, 1.3])
     with c1:
         label("Circuit (optional)")
         circuit = st.selectbox("Circuit", events, index=events.index("Bahrain Grand Prix") if "Bahrain Grand Prix" in events else 0, label_visibility="collapsed", key="lap_circuit")
-    settings = lapmodel.default_settings(defaults, None if circuit == "None" else circuit)
+    settings = serving.default_settings(defaults, None if circuit == "None" else circuit)
     climb = float(circuits.loc[circuit, "climb_m_per_km"]) if circuit != "None" else defaults["mean_climb"]
     label("Laps: edit the table, paste rows or upload a CSV (columns LapNumber, LapTime, Compound, TyreLife, TrackTemp). Leave LapTime blank to forecast a lap")
     upload = st.file_uploader("Upload a CSV of laps", type="csv", label_visibility="collapsed")
-    example, overrides = example_rows(laps)
+    example, overrides = example_data
     source = pd.read_csv(upload) if upload is not None else example
     if "Compound" in source:
         source["Compound"] = source["Compound"].astype(str).str.upper().str.strip()
@@ -149,7 +128,7 @@ def lap_time_tab(served, defaults, circuits, laps):
     columns = {"LapNumber": st.column_config.NumberColumn("Lap", min_value=1, step=1), "LapTime": st.column_config.NumberColumn("Lap time (s)", format="%.3f"), "Compound": st.column_config.SelectboxColumn("Compound", options=config.COMPOUNDS, required=True), "TyreLife": st.column_config.NumberColumn("Tyre life (laps)", min_value=1, step=1), "TrackTemp": st.column_config.NumberColumn("Track temp (C)", format="%.1f")}
     source_id = upload.name if upload is not None else "example"
     table = st.data_editor(source, num_rows="dynamic", use_container_width=True, hide_index=True, column_config=columns, key=f"laps_editor_{source_id}")
-    rows = lapmodel.clean_rows(table)
+    rows = serving.clean_rows(table)
     known_times = rows["LapTime"].dropna()
     fallback = settings["median_s"] or (float(known_times.median()) if len(known_times) else 90.0)
     with c2:
@@ -174,11 +153,11 @@ def lap_time_tab(served, defaults, circuits, laps):
         settings["air_temp"] = air if air > 0 else None
         settings["humidity"] = b2.number_input("Humidity (%)", 0.0, 100.0, round(base.get("humidity", settings["humidity"]), 1), key="hum" + key)
         settings["wind_speed"] = b3.number_input("Wind speed (m/s)", 0.0, 20.0, round(base.get("wind_speed", settings["wind_speed"]), 1), key="wind" + key)
-    kept, built = lapmodel.build_features(table, settings, climb, defaults)
+    kept, built = serving.build_features(table, settings, climb, defaults)
     if kept.empty:
         st.info("Add at least one lap with a compound, tyre life and track temperature.")
         return
-    result = lapmodel.predict_laps(served, built, settings["median_s"])
+    result = serving.predict_laps(served, built, settings["median_s"])
     result["live"] = np.where(built["prev_delta"].isna().to_numpy(), np.nan, result["live"])
     st.write("")
     st.altair_chart(prediction_chart(kept, result), use_container_width=True, theme=None)
@@ -211,8 +190,7 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread
     frames = []
     for c in config.COMPOUNDS:
         frame = pd.DataFrame({"compound": c.title(), "age": ages, "loss": model.curve(c, circuits.loc[event], track_temp, ages)})
-        if draws is not None:
-            frame["low"], frame["high"] = model.curve_band(c, circuits.loc[event], track_temp, ages, draws)
+        frame["low"], frame["high"] = model.curve_band(c, circuits.loc[event], track_temp, ages, draws)
         frames.append(frame)
     curves = pd.concat(frames, ignore_index=True)
     if band_mode.startswith("Single"):
@@ -258,12 +236,7 @@ def correlation_chart(deg):
     selected = deg["selection"]["selected_descriptors"]
     frame = pd.DataFrame({"characteristic": [DESCRIPTOR_LABELS[c] for c in deg["descriptor_spearman_with_severity"]], "correlation": list(deg["descriptor_spearman_with_severity"].values()), "used": ["Used in model" if c in selected else "Not used" for c in deg["descriptor_spearman_with_severity"]]})
     bars = alt.Chart(frame).mark_bar().encode(x=alt.X("correlation:Q", title="Correlation with measured degradation (25 circuits)"), y=alt.Y("characteristic:N", sort="-x", title=None), color=alt.Color("used:N", scale=alt.Scale(domain=["Used in model", "Not used"], range=["#E10600", "#55555A"]), legend=alt.Legend(orient="top", title=None))).properties(height=330)
-    return bars.configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#BDBDC2", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2")
-
-
-def stint_spread(table):
-    gap = table["actual"] - table["model"]
-    return {c: (float(gap[table["Compound"] == c.title()].quantile(0.1)), float(gap[table["Compound"] == c.title()].quantile(0.9))) for c in config.COMPOUNDS}
+    return themed(bars, "#BDBDC2")
 
 
 def stint_chart(frame, title):
@@ -272,7 +245,7 @@ def stint_chart(frame, title):
     dots = alt.Chart(frame).mark_circle(size=70, opacity=0.9).encode(x=x, y=alt.Y("actual:Q", title="Lap time vs stint average (s)"), color=alt.Color("Compound:N", scale=colors, legend=None), tooltip=["age", "actual", "predicted"])
     line = alt.Chart(frame).mark_line(color="#F2F2F2", strokeWidth=2).encode(x=x, y="predicted:Q")
     trend = alt.Chart(frame).mark_line(color="#8E8E93", strokeWidth=1.5, strokeDash=[5, 4]).encode(x=x, y="trend:Q")
-    return alt.layer(dots, trend, line).properties(height=260, title=alt.TitleParams(title, color="#BDBDC2", fontSize=13, fontWeight="normal")).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
+    return themed(alt.layer(dots, trend, line).properties(height=260, title=alt.TitleParams(title, color="#BDBDC2", fontSize=13, fontWeight="normal")))
 
 
 def stint_grid(stints):
@@ -330,16 +303,9 @@ def circuits_tab(model, circuits, selected):
     frame = pd.DataFrame({"circuit": [e.replace(" Grand Prix", "") for e in circuits.index], "loss": [float(model.curve(compound.upper(), circuits.loc[e], track_temp, ages)[-1]) for e in circuits.index]})
     st.write("")
     bars = alt.Chart(frame).mark_bar(color=COMPOUND_COLORS[compound]).encode(x=alt.X("loss:Q", title=f"Predicted lap-time loss after {laps_on} laps (s)"), y=alt.Y("circuit:N", sort="-x", title=None), tooltip=["circuit", alt.Tooltip("loss:Q", format=".2f")]).properties(height=620)
-    st.altair_chart(bars.configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#BDBDC2", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E"), use_container_width=True, theme=None)
+    st.altair_chart(themed(bars, "#BDBDC2"), use_container_width=True, theme=None)
     used = ", ".join(DESCRIPTOR_LABELS[c].lower() for c in selected) or "none"
     st.markdown(f'<div class="f1-note">Circuits ranked by the model for one compound and temperature. With only {used} selected as a circuit effect, differences between circuits are modest and should be read as tendencies, not facts: the 95% bands on the Predictor tab show how much they overlap.</div>', unsafe_allow_html=True)
-
-
-@st.cache_data(show_spinner=False)
-def slope_table(_model, _circuits, _panel):
-    pred = pd.Series(_model.predict_within(_panel, _circuits), index=_panel.index)
-    keyed = _panel.groupby(degradation.STINT_KEY)
-    return pd.DataFrame({"actual": degradation.stint_slopes(_panel["y"], _panel), "model": degradation.stint_slopes(pred, _panel), "Compound": keyed["Compound"].first().str.title(), "laps": keyed["y"].size()}).reset_index(drop=True)
 
 
 def headline(report, deg):
@@ -350,7 +316,7 @@ def headline(report, deg):
     st.write("")
 
 
-def model_tab(model, circuits, panel):
+def model_tab():
     path = config.RESULTS_DIR / "metrics.json"
     deg = read_report()
     if not path.exists() or not deg:
@@ -374,21 +340,20 @@ def main():
     st.set_page_config(page_title="F1 Tyre Degradation", layout="wide")
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown('<div class="f1-bar"></div><div class="f1-title">Tyre Degradation</div><div class="f1-sub">How much slower a stint gets with every lap on the tyre</div>', unsafe_allow_html=True)
-    model, circuits, selected, draws, totals, fuel_total_s, panel, laps = load_model()
+    a = load_artifacts()
     tab_predict, tab_explore, tab_circuits, tab_model = st.tabs(["Predictor", "Race explorer", "Circuits", "Model"])
-    spread = stint_spread(slope_table(model, circuits, panel))
     with tab_predict:
         curves_tab, laps_tab = st.tabs(["Tyre curves", "Lap times"])
         with curves_tab:
-            predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread)
+            predictor_tab(a["degradation"], a["circuits"], a["selected"], a["draws"], a["totals"], a["fuel_total_s"], a["spread"])
         with laps_tab:
-            lap_time_tab(load_lap_models(laps), lapmodel.reference_defaults(laps, circuits), circuits, laps)
+            lap_time_tab(a["served"], a["defaults"], a["circuits"], a["example"])
     with tab_explore:
-        explorer_tab(model, circuits, panel)
+        explorer_tab(a["degradation"], a["circuits"], a["panel"])
     with tab_circuits:
-        circuits_tab(model, circuits, selected)
+        circuits_tab(a["degradation"], a["circuits"], a["selected"])
     with tab_model:
-        model_tab(model, circuits, panel)
+        model_tab()
 
 
 main()

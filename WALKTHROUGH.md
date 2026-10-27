@@ -8,10 +8,10 @@ Contents:
 1. Background: F1 and the vocabulary
 2. README and the results: how to read the numbers
 3. `f1tyre/numpy_ml.py`: the machine learning written from scratch
-4. `f1tyre/data.py`, `f1tyre/features.py`, `tests/`: from raw laps to features, and how leakage is prevented
+4. `f1tyre/features.py`: from raw laps to features, and how leakage is prevented
 5. `f1tyre/models.py`: fuel effect, baselines, prediction intervals
 6. `f1tyre/degradation.py`: the within-stint degradation model
-7. `f1tyre/circuits.py` and `fetch_circuits.py`: circuit characteristics from telemetry
+7. `fetch_data.py`: circuit characteristics from telemetry
 8. `evaluate.py` and `evaluate_degradation.py`: every test we ran and why
 9. `app.py` and the report
 10. Viva questions and answers
@@ -34,7 +34,7 @@ Contents:
 
 **Headline results (2025, unseen races).** Pre-lap MAE 0.468 s (R2 0.66), pre-stint 0.437 s (0.70), live 0.294 s (0.82), against 0.875 s for "always predict the median". Soft tyres lose 0.067 s per lap, medium 0.050, hard 0.038, and the model recovers 0.064, 0.049, 0.038 on stints it never saw.
 
-**What makes the project credible.** Everything is implemented from scratch. Every number comes from races the model never trained on. We tested for leakage (a unit test and a label-shuffle test), tested stability (cross-validation, leave-one-year-out, bootstrap) and reported negative results honestly (circuit characteristics mostly do not help).
+**What makes the project credible.** Everything is implemented from scratch. Every number comes from races the model never trained on. We tested for leakage (a label-shuffle test, and features built only from earlier races and laps), tested stability (cross-validation, leave-one-year-out, bootstrap) and reported negative results honestly (circuit characteristics mostly do not help).
 
 ---
 
@@ -107,7 +107,7 @@ A single lap has about 0.33 s of unavoidable randomness (traffic, small mistakes
 - Missing values become 0 after standardising, i.e. "the average value".
 - The intercept is the mean of y and is not penalised.
 
-Why ridge? It shrinks coefficients toward zero, which stabilises estimates when features are correlated (tyre age, age squared, lap number are all strongly correlated here). The unit test `test_ridge_shrinks_coefficients` checks the shrinkage.
+Why ridge? It shrinks coefficients toward zero, which stabilises estimates when features are correlated (tyre age, age squared, lap number are all strongly correlated here).
 
 ### 3.2 Gradient boosting: the idea
 
@@ -137,7 +137,7 @@ loss = alpha * r          if r > 0     (we under-predicted)
 loss = (1 - alpha) * (-r) if r <= 0    (we over-predicted)
 ```
 
-- With `alpha = 0.5` this is half the absolute error, so minimising it gives the **median**. This is what "LAD" (least absolute deviation) means. We use it for the main model because lap times have outliers (traffic, mistakes), and the median is robust to them where the mean is not. The unit test `test_median_boosting_is_robust_to_outliers` checks this.
+- With `alpha = 0.5` this is half the absolute error, so minimising it gives the **median**. This is what "LAD" (least absolute deviation) means. We use it for the main model because lap times have outliers (traffic, mistakes), and the median is robust to them where the mean is not.
 - With `alpha = 0.05` or `0.95` the loss penalises under- and over-prediction asymmetrically, and the minimiser is the 5th or 95th percentile. We use this for prediction intervals.
 
 **The negative gradient** of the pinball loss with respect to the prediction is `alpha` when `r > 0` and `-(1 - alpha)` when `r <= 0`. That is exactly the line in the code:
@@ -182,21 +182,15 @@ This is the reduction in squared error when fitting the gradient with a constant
 
 The pre-lap tier is regularised much harder (50% rows, big leaves) because it has little signal per lap and overfits otherwise. We found this by checking the gap between training and test error: pre-lap train MAE 0.374 against test 0.468 is a moderate gap, live 0.261 against 0.294 is small.
 
-### 3.6 Feature importance
+### 3.6 How good is it compared to XGBoost?
 
-`gain_` accumulates the split gain per feature across all trees, and `feature_importances_` normalises it. It tells you which features the model used most, not which causal factors matter, and it is biased toward features with many distinct values. Be careful describing it.
-
-### 3.7 How good is it compared to XGBoost?
-
-We ran the same split with XGBoost (kept in `reference_sklearn_xgboost/`) and the from-scratch version matched within 0.002 s MAE. The from-scratch version is slower (about 6 s for pre-lap, 30 s for live) because it is NumPy not C++. What it lacks compared with XGBoost: second-order (Hessian) optimisation, sparsity-aware split finding with learned default directions for missing values (ours always sends NaN left), parallelism and exact greedy mode.
+We ran the same split with XGBoost during development (the comparison code is in the git history) and the from-scratch version matched within 0.002 s MAE. The from-scratch version is slower (about 6 s for pre-lap, 30 s for live) because it is NumPy not C++. What it lacks compared with XGBoost: second-order (Hessian) optimisation, sparsity-aware split finding with learned default directions for missing values (ours always sends NaN left), parallelism and exact greedy mode.
 
 **Which algorithm exactly did we implement?** Friedman's gradient boosting machine with regression trees as base learners, using the pinball loss, a LAD-TreeBoost-style quantile line search per leaf, histogram-based split finding, row and column subsampling and L2-regularised gain. It is "XGBoost-like", not XGBoost.
 
-The tests in `tests/test_numpy_ml.py`: known metric values, OLS and ridge coefficient recovery, learning a non-linear function with missing values, robustness to outliers, quantile coverage, determinism with a seed, input validation.
-
 ---
 
-## 4. `data.py`, `features.py`, `tests/`: from raw laps to features
+## 4. `features.py`: from raw laps to features
 
 ### 4.1 Cleaning (`clean_laps`)
 
@@ -246,14 +240,10 @@ The 104% cut is a judgement call made while looking at data, mentioned in the li
 1. **Time-aware features.** Form and stint history only use earlier races or earlier stints (`shift(1)`, cumulative sums minus the current row).
 2. **Previous-lap-only traffic and field features.** Nothing from the lap being predicted.
 3. **Grouping by race in every split.** Laps from the same race never appear in both train and test, because laps within a race are strongly correlated (same weather, same safety cars).
-4. **The leakage unit test** (`test_no_future_information_leaks_into_earlier_races`): it alters a later race and checks that no feature of an earlier race changes. We checked the test itself by deliberately breaking the code, and it failed as it should (a "mutation check").
-5. **A second unit test** (`test_stint_history_uses_only_earlier_stints`) for the pre-stint features.
+4. **Chronological construction.** Every form and stint-history feature is built from earlier races or earlier stints only, so changing a later race cannot change the features of an earlier one. (An automated check of this was used during development and later removed from the repository.)
+5. **Pre-stint features** use only earlier stints of the same race (cumulative sums minus the current stint).
 6. **The label-shuffle test** (section 8): train on randomly shuffled targets. If R2 on real test data is about 0 the pipeline contains no hidden leak. We get R2 0.00.
 7. **M-free field features.** An earlier field-pace feature carried the race median `M` (itself computed from the whole race, including the lap being predicted), so we kept only versions that do not contain it.
-
-### 4.6 What the other tests cover
-
-`test_clean_laps_exclude_pit_laps_and_lap_one`, `test_target_is_relative_to_field_median`, `test_tier_features_are_present_and_finite`, `test_every_event_has_circuit_features`.
 
 ---
 
@@ -372,9 +362,9 @@ Looking at single stints in the Race explorer, the white model line often looks 
 
 ---
 
-## 7. `f1tyre/circuits.py` and `fetch_circuits.py`: circuit characteristics
+## 7. `fetch_data.py`: circuit characteristics
 
-For each of the 25 circuits `fetch_circuits.py` loads the fastest clean race lap's telemetry (speed, throttle, brake, X/Y/Z position, time vs distance) and `profile_from_telemetry` converts it into 13 numbers.
+For each of the 25 circuits `python fetch_data.py circuits` loads the fastest clean race lap's telemetry (speed, throttle, brake, X/Y/Z position, time vs distance) and `profile_from_telemetry` converts it into 13 numbers.
 
 Processing steps:
 
@@ -386,8 +376,6 @@ Processing steps:
 6. **Braking** share is time with the brake on, and heavy braking zones are separated brake applications that lose at least 100 km/h.
 7. **Throttle**: share of time at 98% or more.
 8. **Elevation change per km** is the sum of absolute changes in the smoothed height `Z` divided by lap length (total climbing plus descending per km, not net).
-
-The tests build synthetic circles with analytic answers (a circle of known radius and speed has a known lateral g) to confirm the maths.
 
 **Result.** Cross-validation kept only elevation change (Spearman 0.59 with measured severity). All 13 together do not help, and predicting a circuit's severity from all 13 fails on circuits left out (R2 -0.17). The honest explanation: 25 circuits is a tiny sample for 13 variables, and severity also depends on tyre allocation, weather and incidents. Severity is not even stable between years (year-to-year correlations 0.73, 0.41, 0.15). This is a genuine negative result and it is fine to say so.
 
@@ -434,9 +422,9 @@ Reading the result table: within-stint R2 0.31 and slope correlation 0.35 with t
 
 ### 9.1 The app (Streamlit)
 
-`load_model` (cached, so it runs once) builds the lap table, fits the fuel effect and the final degradation model on all 2022 to 2025 data using the descriptor and shape settings saved in `results/degradation.json`, and loads the bootstrap draws. Tabs:
+`build_app.py` does the slow work once and saves it to `artifacts/app.pkl.gz`: the lap table, the fuel effect, the degradation model fitted on all 2022 to 2025 data with the descriptor and shape settings from `results/degradation.json`, the bootstrap draws, the pre-lap and live gradient boosting models, and the defaults for the lap-time predictor. The app loads that one file in about two seconds (and rebuilds it if it is missing). Tabs:
 
-- **Predictor, Lap times.** The saved pre-lap and live gradient boosting models (`models/`, trained by `train_models.py` on all races and loaded in a moment) predict lap times for laps the user enters. `f1tyre/lapmodel.py` turns the table (lap, lap time, compound, tyre life, track temperature, optional circuit) into the same features the models were trained on. Previous-lap features for the live model come from the earlier rows of the table, and the first row has no live prediction. The models predict a lap relative to the race median, so the median comes from the circuit or the user. Inputs not given (weather, traffic, driver pace, field trend) take neutral defaults, which makes predictions worse; the example fills in the real values. Tests in `tests/test_lapmodel.py` check that entered laps rebuild the training features exactly and that live features use only earlier laps.
+- **Predictor, Lap times.** The saved pre-lap and live gradient boosting models (trained on all races by `build_app.py`) predict lap times for laps the user enters. `f1tyre/serving.py` turns the table (lap, lap time, compound, tyre life, track temperature, optional circuit) into the same features the models were trained on. Previous-lap features for the live model come from the earlier rows of the table, and the first row has no live prediction. The models predict a lap relative to the race median, so the median comes from the circuit or the user. Inputs not given (weather, traffic, driver pace, field trend) take neutral defaults, which makes predictions worse; the example fills in the real values. The live features use only the laps entered before each lap.
 - **Predictor, Tyre curves.** Choose circuit and track temperature. Calls `model.curve` for each compound and `curve_band` for the shaded 95% interval. The "Lap time with fuel burn" view subtracts `fuel_total / race_laps * (age - 1)`, so you see the net effect of wear plus fuel, which can go down. The tiles give the loss after 10, 20 and 30 laps. The circuit profile shows telemetry-derived measures, with the one used by the model marked red.
 - **Race explorer.** Pick a season, race and driver. For each stint of 8 or more clean laps, plots actual fuel-corrected laps (minus the stint mean) against the model's within-stint prediction, with a table of actual and model seconds per lap.
 - **Circuits.** Ranks the 25 circuits by predicted loss after N laps for a chosen compound and temperature. Differences are modest because only elevation is a circuit input (plus temperature at a fixed value), so treat it as tendency.
@@ -502,7 +490,7 @@ A: Shrinkage (learning rate 0.05), row and column subsampling, minimum leaf size
 A: On the same split it matched within 0.002 s MAE. It is slower, uses only first-order information, and has no learned missing-value direction.
 
 **Q: Why not just use scikit-learn?**
-A: The assignment required implementing from scratch with NumPy and pandas. We kept an sklearn/XGBoost version in `reference_sklearn_xgboost/` for comparison.
+A: The assignment required implementing from scratch with NumPy and pandas. An sklearn/XGBoost version used for comparison during development is in the git history.
 
 **Q: What is the difference between bagging and boosting?**
 A: Bagging trains models independently on resamples and averages them (reduces variance, random forest). Boosting trains sequentially, each on the errors of the sum so far (reduces bias). We use row and column subsampling inside boosting for extra variance reduction.
@@ -513,7 +501,7 @@ A: Least squares with an L2 penalty on coefficients. It shrinks them and stabili
 ### Features and leakage
 
 **Q: What is data leakage and how did you prevent it?**
-A: Using information at training or prediction time that would not be available in reality. We used only earlier races for form (`shift(1)`), previous-lap values for traffic and field context, race-grouped splits, a unit test that changes a later race and checks earlier features stay identical, and a label-shuffle test that gives R2 0.00.
+A: Using information at training or prediction time that would not be available in reality. We used only earlier races for form (`shift(1)`), previous-lap values for traffic and field context, race-grouped splits, features built only from earlier races, and a label-shuffle test that gives R2 0.00.
 
 **Q: Why did you use the form features and are they leaky?**
 A: They capture that some drivers and cars are faster. They average the driver's or team's pace ratio over earlier races only, so they are not leaky. The first races of 2022 fall back to the team's form, and then to a neutral 1.0.

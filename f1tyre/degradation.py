@@ -1,9 +1,3 @@
-"""Tyre degradation model: fuel-corrected lap-time change with tyre age, estimated within stints.
-
-Every stint is compared only with itself (stint fixed effects), so driver pace, car, strategy and
-compound pace offsets cancel out. Compound, track temperature and circuit characteristics enter
-as interactions with tyre age, which makes the coefficients directly interpretable.
-"""
 import numpy as np
 import pandas as pd
 from f1tyre.config import COMPOUNDS
@@ -138,20 +132,6 @@ def race_folds(panel, n_folds=5):
     return panel["race_id"].map(fold_of_race).to_numpy()
 
 
-def select_alpha(panel, circuits, circuit_columns, alphas, n_folds=5):
-    folds = race_folds(panel, n_folds)
-    scores = {}
-    for alpha in alphas:
-        errors = []
-        for fold in range(n_folds):
-            train = panel[folds != fold].reset_index(drop=True)
-            valid = panel[folds == fold].reset_index(drop=True)
-            model = DegradationModel(circuit_columns, alpha=alpha).fit(train, circuits)
-            errors.append(float(np.abs(within_stint(valid["y"], valid) - model.predict_within(valid, circuits)).mean()))
-        scores[alpha] = float(np.mean(errors))
-    return min(scores, key=scores.get), scores
-
-
 def circuit_severity(panel):
     age_c = within_stint(panel["age"], panel)
     frame = pd.DataFrame({"EventName": panel["EventName"], "Compound": panel["Compound"], "xy": age_c * within_stint(panel["y"], panel), "xx": age_c ** 2})
@@ -171,7 +151,6 @@ def rank_descriptors(panel, circuits, columns):
 
 
 def rank_permutation_p(table, severity, n_permutations=5000, seed=42):
-    """p-value for the strongest rank correlation among all columns, allowing for having picked the best of them."""
     ranks = table.rank().to_numpy()
     target = severity.rank().to_numpy()
     rng = np.random.RandomState(seed)

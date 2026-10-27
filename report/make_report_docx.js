@@ -1,4 +1,3 @@
-// Builds report/report.docx (editable Word version of the report) from results/metrics.json.
 const fs = require("fs");
 const path = require("path");
 const {
@@ -74,7 +73,6 @@ function run(text, opts = {}) {
   return new TextRun({ text, font: FONT, size: 21, ...opts });
 }
 
-// Paragraph from segments: strings are plain, [text] arrays are bold.
 function para(segments, opts = {}) {
   const children = segments.map((s) => (Array.isArray(s) ? run(s[0], { bold: true }) : run(s)));
   return new Paragraph({ children, spacing: { after: 110, line: 300 }, ...opts });
