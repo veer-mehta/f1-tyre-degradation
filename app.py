@@ -48,7 +48,7 @@ def read_report():
 
 
 @st.cache_resource(show_spinner="Loading the models")
-def load_artifacts():
+def load_cached():
     return serving.load()
 
 
@@ -354,7 +354,7 @@ def main():
     st.set_page_config(page_title="F1 Tyre Degradation", layout="wide")
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown('<div class="f1-bar"></div><div class="f1-title">Tyre Degradation</div><div class="f1-sub">How much slower a stint gets with every lap on the tyre</div>', unsafe_allow_html=True)
-    a = load_artifacts()
+    a = load_cached()
     tab_predict, tab_explore, tab_circuits, tab_model = st.tabs(["Predictor", "Race explorer", "Circuits", "Model"])
     with tab_predict:
         curves_tab, laps_tab = st.tabs(["Tyre curves", "Lap times"])

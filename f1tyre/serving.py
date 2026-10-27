@@ -7,7 +7,7 @@ from f1tyre import degradation, features, models
 from f1tyre.config import COMPOUNDS, DIRTY_AIR_GAP_S, NEUTRAL_PACE_RATIO, RESULTS_DIR, ROOT, TIERS
 
 
-ARTIFACT_PATH = ROOT / "artifacts" / "app.pkl.gz"
+CACHE_PATH = ROOT / "cached" / "app.pkl.gz"
 SERVED_TIERS = ["pre_lap", "live"]
 NO_NEUTRAL_LAPS = 40.0
 
@@ -134,18 +134,23 @@ def build():
 
 
 def refresh():
-    artifacts = build()
-    ARTIFACT_PATH.parent.mkdir(exist_ok=True)
-    with gzip.open(ARTIFACT_PATH, "wb") as f:
-        pickle.dump(artifacts, f)
-    return artifacts
+    cached = build()
+    CACHE_PATH.parent.mkdir(exist_ok=True)
+    with gzip.open(CACHE_PATH, "wb") as f:
+        pickle.dump(cached, f)
+    return cached
 
 
 def load():
-    if ARTIFACT_PATH.exists():
+    if CACHE_PATH.exists():
         try:
-            with gzip.open(ARTIFACT_PATH, "rb") as f:
+            with gzip.open(CACHE_PATH, "rb") as f:
                 return pickle.load(f)
         except Exception:
             pass
     return refresh()
+
+
+if __name__ == "__main__":
+    refresh()
+    print(f"saved {CACHE_PATH}")
