@@ -284,45 +284,6 @@
       "piecewise-linear, knots 4-22, strong smoothing": 0.1446
     }
   },
-  "cliff": {
-    "min_stint_laps": 20,
-    "min_bic_gain": 10.0,
-    "min_extra_slope_s_per_lap": 0.1,
-    "summary": {
-      "ALL": {
-        "stints": 1571,
-        "cliff_share": 0.0586,
-        "relief_share_noise_reference": 0.0153,
-        "cliff_stints": 92,
-        "median_onset_age": 24.0,
-        "median_extra_slope_s_per_lap": 0.251
-      },
-      "SOFT": {
-        "stints": 102,
-        "cliff_share": 0.098,
-        "relief_share_noise_reference": 0.0098,
-        "cliff_stints": 10,
-        "median_onset_age": 18.5,
-        "median_extra_slope_s_per_lap": 0.248
-      },
-      "MEDIUM": {
-        "stints": 509,
-        "cliff_share": 0.0373,
-        "relief_share_noise_reference": 0.0138,
-        "cliff_stints": 19,
-        "median_onset_age": 21.0,
-        "median_extra_slope_s_per_lap": 0.25
-      },
-      "HARD": {
-        "stints": 960,
-        "cliff_share": 0.0656,
-        "relief_share_noise_reference": 0.0167,
-        "cliff_stints": 63,
-        "median_onset_age": 27.0,
-        "median_extra_slope_s_per_lap": 0.253
-      }
-    }
-  },
   "final_model": {
     "circuit_columns": [
       "climb_m_per_km"

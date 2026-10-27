@@ -9,7 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from f1tyre import cliff, config, data, features, models
+from f1tyre import config, data, features, models
 from f1tyre.circuits import DESCRIPTOR_LABELS
 from f1tyre import degradation as dg
 from f1tyre import numpy_ml as ml
@@ -109,24 +109,6 @@ def plot_curve_check(table, path):
     plt.close(fig)
 
 
-def plot_cliffs(table, summary, path):
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
-    bins = np.arange(8, 48, 4)
-    cliffs = table[table["cliff"]]
-    axes[0].hist([cliffs[cliffs["Compound"] == c]["knee"] for c in config.COMPOUNDS], bins=bins, stacked=True, color=[COMPOUND_COLORS[c] for c in config.COMPOUNDS], label=[c.title() for c in config.COMPOUNDS])
-    axes[0].set(xlabel="Tyre age at which the loss speeds up (laps)", ylabel="Stints", title=f"Detected cliffs ({len(cliffs)} of {len(table)} stints of 20+ laps)")
-    axes[0].legend()
-    x = np.arange(3)
-    axes[1].bar(x - 0.18, [100 * summary[c]["cliff_share"] for c in config.COMPOUNDS], 0.36, color="#E10600", label="speeds up late (cliff)")
-    axes[1].bar(x + 0.18, [100 * summary[c]["relief_share_noise_reference"] for c in config.COMPOUNDS], 0.36, color="#888888", label="slows down late (noise reference)")
-    axes[1].set_xticks(x, [c.title() for c in config.COMPOUNDS])
-    axes[1].set(ylabel="Share of stints (%)", title="Cliffs against the noise reference")
-    axes[1].legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
 def plot_descriptor_correlations(correlations, selected, path):
     order = sorted(correlations, key=lambda c: correlations[c])
     colors = ["#E10600" if c in selected else "#888888" for c in order]
@@ -198,12 +180,6 @@ def main():
     check.to_csv(RESULTS_DIR / "curve_check.csv", index=False)
     report["curve_check_2025"] = {"mean_abs_error_s": round(float((check["actual"] - check["predicted"]).abs().mean()), 4), "points": int(len(check)), "by_shape_2025": {name: round(dg.curve_fidelity(dg.DegradationModel(alpha=100.0, **kw).fit(ptrain), ptest), 4) for name, kw in SHAPE_CANDIDATES.items()}}
     plot_curve_check(check, RESULTS_DIR / "curve_check.png")
-    cliffs = cliff.find_cliffs(panel_all)
-    cliffs.to_csv(RESULTS_DIR / "cliff_stints.csv", index=False)
-    summary = cliff.summarise_cliffs(cliffs)
-    report["cliff"] = {"min_stint_laps": cliff.MIN_CLIFF_LAPS, "min_bic_gain": cliff.MIN_BIC_GAIN, "min_extra_slope_s_per_lap": cliff.MIN_EXTRA_SLOPE, "summary": summary}
-    print("cliffs", summary, flush=True)
-    plot_cliffs(cliffs, summary, RESULTS_DIR / "cliff.png")
     final = dg.DegradationModel(selected, alpha=100.0, **shape).fit(panel_all, circuits)
     draws = bootstrap_coefficients(panel_all, circuits, selected, shape)
     draws.to_csv(RESULTS_DIR / "degradation_bootstrap.csv", index=False)

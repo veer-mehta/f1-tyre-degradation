@@ -346,21 +346,7 @@ Looking at single stints in the Race explorer, the white model line often looks 
 - What we tried. Weighting every stint equally removes the bias (calibration slope 1.01) but fits unseen 2025 stints worse (curve error 0.29 against 0.18 s) and makes the circuit characteristic stop helping, so we kept the lap-weighted fit. Adding the stint's length as a covariate helps slightly (calibration 1.53 to 1.31) but is not usable for planning, because a stint's length is a consequence of its wear, not a choice that changes it. Season terms did not improve held-out error.
 - What to say: the line is the conditional average, the dots show individual variation, and the single-stint band in the Predictor and the trend lines in the Race explorer show that spread, so the limitation is stated, not hidden.
 
-### 6.7c Tyre cliff detection (`f1tyre/cliff.py`)
-
-**What a cliff is.** A tyre does not always wear steadily. Past some age the rubber can suddenly lose grip, so each extra lap costs far more than the one before.
-
-**Why the average curve cannot show it.** (1) Teams usually pit before a cliff arrives. (2) The age at which it starts differs between stints. (3) An average over all stints at each age mixes stints that have and have not reached it. So we look at stints one by one.
-
-**Method.** For every stint with at least 20 clean laps we fit two models to the fuel-corrected lap times: a straight line, and a straight line plus a hinge `max(age - knee, 0)`, which lets the slope increase after the knee age. We try every possible knee (at least 8 laps before it and 4 after) and keep the best. We call it a cliff when (a) the hinge model fits clearly better by BIC (a gain over 10, so the extra parameter is worth it) (b) the extra slope is at least 0.1 s per lap and (c) the knee lies in the second half of the stint (an early knee is a warm-up shape, where the tyre switches on and then wears, not a cliff). BIC (Bayesian information criterion) is a fit score that charges a penalty for each extra parameter, so a gain of 10 means the hinge is clearly not just fitting noise.
-
-**The noise reference.** Random noise (traffic, a mistake) can make a stint look like it speeds up late. The same noise can make a stint look like it slows down late by the same amount, and a tyre cliff cannot produce that. So the share of stints that slow down late, which we call relief, estimates how many false cliffs to expect. Result: 5.9% of long stints speed up late and 1.5% slow down late, so about 4% have a real cliff, typically 0.25 s per lap steeper afterwards, with a median onset age of 24 laps (soft 18.5, medium 21, hard 27, ordered as you would expect). The soft sample is small (10 cliffs). Our first version accepted a knee anywhere and found 11%, but many of those early knees were warm-up shapes, so we restricted cliffs to the second half of the stint.
-
-**Caveats to state.** The reference controls for symmetric noise only. A slow traffic phase at the end of a stint could still look like a cliff, and tyre-saving or a car problem can mimic one. We cannot see tyre temperature, so we call it a late speed-up in lap-time loss, which is what a cliff does to lap times.
-
-**Where it appears.** `evaluate_degradation.py` writes `results/cliff_stints.csv`, `cliff.png` and the summary in `degradation.json`. The Race explorer draws a red dotted line at the detected onset, and the Model tab shows the table and histogram. Tests are in `tests/test_cliff.py` (a synthetic knee is found, straight stints are not flagged, a late recovery is not called a cliff).
-
-### 6.7d Why elevation change, and why only one characteristic?
+### 6.7c Why elevation change, and why only one characteristic?
 
 **What we found.** Across the 25 circuits, elevation change per km has a rank correlation of 0.59 with measured degradation severity. Because we picked the best of 13 candidates, 0.59 must be compared with the best correlation chance alone would produce among 13 unrelated columns. We did that with a permutation test (shuffle which circuit has which severity, keep the best of 13, repeat 5,000 times): p = 0.02. Dropping any single circuit gives 0.55 to 0.66, so one odd circuit does not drive it. It is statistically real but modest.
 
@@ -453,7 +439,7 @@ Reading the result table: within-stint R2 0.31 and slope correlation 0.35 with t
 - **Predictor.** Choose circuit and track temperature. Calls `model.curve` for each compound and `curve_band` for the shaded 95% interval. The "Lap time with fuel burn" view subtracts `fuel_total / race_laps * (age - 1)`, so you see the net effect of wear plus fuel, which can go down. The tiles give the loss after 10, 20 and 30 laps. The circuit profile shows telemetry-derived measures, with the one used by the model marked red.
 - **Race explorer.** Pick a season, race and driver. For each stint of 8 or more clean laps, plots actual fuel-corrected laps (minus the stint mean) against the model's within-stint prediction, with a table of actual and model seconds per lap.
 - **Circuits.** Ranks the 25 circuits by predicted loss after N laps for a chosen compound and temperature. Differences are modest because only elevation is a circuit input (plus temperature at a fixed value), so treat it as tendency.
-- **Model.** Headline tiles and result tables from `metrics.json` and `degradation.json`, the cliff results and the circuit correlation chart.
+- **Model.** Headline tiles and result tables from `metrics.json` and `degradation.json` and the circuit correlation chart.
 
 Design choices worth knowing: Altair charts for the dark F1 theme; all numbers come from the saved results files and the fitted model, none are hard-coded except the "1.7x" tile (soft over hard wear).
 
@@ -606,10 +592,7 @@ A: No. It is a tested, reported finding: severity depends on tyre allocation, we
 ### Cliff and circuit questions
 
 **Q: Did you find the tyre cliff?**
-A: Yes, at stint level. About 4% of stints of 20 or more laps have a real late speed-up of roughly 0.25 s per lap, starting at a median age of 24 laps. An average curve cannot show it because teams pit before it and onset ages differ.
-
-**Q: How do you know those are cliffs and not noise?**
-A: Stints that slow down late by the same amount appear in 1.5% of stints, against 5.9% that speed up, and symmetric noise would produce both equally. The excess is the cliff.
+A: Not in the average curve. We tested flexible curve shapes that can show a late cliff and the plain parabola fitted held-out stints best, so the data do not support one in the average. We also tried flagging cliffs in individual long stints, but the flags were unreliable (early warm-up shapes, traffic and lifts look similar), so we removed that feature rather than claim something we could not trust.
 
 **Q: How is elevation change related to tyre degradation?**
 A: Empirically, circuits with more elevation change had higher measured degradation (rank correlation 0.59, p = 0.02 after allowing for choosing the best of 13). We do not claim a proven mechanism; it may stand in for layout and surface traits of hilly circuits.
