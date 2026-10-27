@@ -3,9 +3,13 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from f1tyre import config, serving
+from f1tyre import config, degradation, serving
+from f1tyre.config import DESCRIPTOR_LABELS
 
 
+COMPOUND_COLORS = {"Soft": "#E10600", "Medium": "#FFD12E", "Hard": "#F2F2F2"}
+MAX_AGE = 30
+PROFILE_STATS = [("length_km", "{:.1f} km"), ("avg_speed_kmh", "{:.0f} km/h"), ("full_throttle_pct", "{:.0f}%"), ("brake_pct", "{:.0f}%"), ("mean_lat_g", "{:.2f} g"), ("climb_m_per_km", "{:.0f} m/km")]
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600;700&display=swap');
@@ -17,8 +21,14 @@ html, body, [class*="css"], .stApp { font-family: 'Titillium Web', sans-serif; }
 .f1-title { font-size: 1.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.1; }
 .f1-sub { color: #8E8E93; font-size: 0.95rem; margin: 6px 0 26px 0; font-weight: 300; }
 .f1-label { color: #8E8E93; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 4px; }
+.f1-card { background: #121214; border: 1px solid #222226; border-left: 3px solid var(--c); padding: 14px 18px; }
+.f1-card .name { font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; color: #BDBDC2; font-weight: 600; }
+.f1-card .row { display: flex; gap: 20px; margin-top: 8px; }
+.f1-card .num { font-size: 1.35rem; font-weight: 700; line-height: 1.05; white-space: nowrap; }
+.f1-card .cap { color: #8E8E93; font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
 .f1-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 4px; }
 .f1-stat { background: #121214; border: 1px solid #222226; padding: 10px 14px; }
+.f1-stat.used { border-left: 3px solid #E10600; }
 .f1-stat .num { font-size: 1.15rem; font-weight: 700; white-space: nowrap; }
 .f1-stat .cap { color: #8E8E93; font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .f1-note { color: #6F6F76; font-size: 0.82rem; margin-top: 18px; line-height: 1.5; }
@@ -32,6 +42,11 @@ td { border-bottom: 1px solid #1B1B1E; padding: 9px 6px; }
 """
 
 
+def read_report():
+    path = config.RESULTS_DIR / "degradation.json"
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
 @st.cache_resource(show_spinner="Loading the models")
 def load_cached():
     return serving.load()
@@ -43,6 +58,30 @@ def themed(chart, label_color="#8E8E93"):
 
 def label(text):
     st.markdown(f'<div class="f1-label">{text}</div>', unsafe_allow_html=True)
+
+
+def chart(curves, y_title):
+    colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
+    x = alt.X("age:Q", title="Tyre age (laps)", scale=alt.Scale(domain=[1, MAX_AGE]))
+    color = alt.Color("compound:N", scale=colors, legend=alt.Legend(orient="top", title=None, symbolType="stroke", symbolStrokeWidth=4, symbolOpacity=1, labelFontSize=13))
+    line = alt.Chart(curves).mark_line(strokeWidth=3, interpolate="monotone").encode(x=x, y=alt.Y("loss:Q", title=y_title), color=color)
+    band = alt.Chart(curves).mark_area(opacity=0.14, interpolate="monotone").encode(x=x, y="low:Q", y2="high:Q", color=color)
+    base = band + line
+    return themed(base.properties(height=380))
+
+
+def card(compound, curves):
+    g = curves[curves["compound"] == compound].set_index("age")["loss"]
+    color = COMPOUND_COLORS[compound]
+    return f'<div class="f1-card" style="--c:{color}"><div class="name">{compound}</div><div class="row"><div><div class="num">{g.loc[10]:+.2f}s</div><div class="cap">10 laps</div></div><div><div class="num">{g.loc[20]:+.2f}s</div><div class="cap">20 laps</div></div><div><div class="num">{g.loc[30]:+.2f}s</div><div class="cap">30 laps</div></div></div></div>'
+
+
+def circuit_profile(row, selected):
+    blocks = ""
+    for column, fmt in PROFILE_STATS:
+        used = " used" if column in selected else ""
+        blocks += f'<div class="f1-stat{used}"><div class="num">{fmt.format(row[column])}</div><div class="cap">{DESCRIPTOR_LABELS[column].split(" (")[0]}</div></div>'
+    return f'<div class="f1-stats">{blocks}</div>'
 
 
 def prediction_chart(kept, result):
@@ -132,6 +171,49 @@ def lap_time_tab(served, defaults, circuits, example_data):
     st.markdown('<div class="f1-note">The gradient boosting models, written from scratch, predict a lap relative to the race median lap, so a race median is needed to give seconds: it is taken from the circuit (latest season) or from your own laps, and you can change it. The pre-lap model ignores lap times; the live model also uses the lap times you entered before each lap, so it needs an earlier lap and shows a dash for the first one. Inputs you leave out (weather, traffic, driver pace, how the field is trending) take neutral defaults, which makes predictions worse: these race conditions matter, and the example shows the models with the real values filled in. The circuit effect is its elevation change. Both models were trained on all races from 2022 to 2025, so the example stint is part of their training data and fits better than new laps would; the honest error on unseen races is on the Model tab.</div>', unsafe_allow_html=True)
 
 
+def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread):
+    c1, c2, c3, c4 = st.columns([2, 1.3, 1.5, 1.7])
+    with c1:
+        label("Circuit")
+        events = sorted(circuits.index)
+        event = st.selectbox("Circuit", events, index=events.index("Bahrain Grand Prix") if "Bahrain Grand Prix" in events else 0, label_visibility="collapsed")
+    with c2:
+        label("Track temperature (C)")
+        track_temp = st.slider("Track temperature", 15, 55, 35, label_visibility="collapsed")
+    with c3:
+        label("View")
+        view = st.radio("View", ["Tyre effect", "Lap time with fuel burn"], horizontal=True, label_visibility="collapsed")
+    with c4:
+        label("Shaded band")
+        band_mode = st.radio("Shaded band", ["Average (95%)", "Single stints (80%)"], horizontal=True, label_visibility="collapsed")
+    ages = np.arange(1, MAX_AGE + 1)
+    frames = []
+    for c in config.COMPOUNDS:
+        frame = pd.DataFrame({"compound": c.title(), "age": ages, "loss": model.curve(c, circuits.loc[event], track_temp, ages)})
+        frame["low"], frame["high"] = model.curve_band(c, circuits.loc[event], track_temp, ages, draws)
+        frames.append(frame)
+    curves = pd.concat(frames, ignore_index=True)
+    if band_mode.startswith("Single"):
+        low_slope = curves["compound"].str.upper().map({c: spread[c][0] for c in spread})
+        high_slope = curves["compound"].str.upper().map({c: spread[c][1] for c in spread})
+        curves["low"] = curves["loss"] + low_slope * (curves["age"] - 1)
+        curves["high"] = curves["loss"] + high_slope * (curves["age"] - 1)
+    fuel_view = view.startswith("Lap time")
+    if fuel_view:
+        burn = fuel_total_s / totals[event] * (curves["age"] - 1)
+        for column in [c for c in ["loss", "low", "high"] if c in curves]:
+            curves[column] = curves[column] - burn
+    st.write("")
+    st.altair_chart(chart(curves, "Lap time vs first lap of the stint (s)" if fuel_view else "Lap-time loss vs fresh tyre (s)"), use_container_width=True, theme=None)
+    for col, compound in zip(st.columns(3), COMPOUND_COLORS):
+        col.markdown(card(compound, curves), unsafe_allow_html=True)
+    st.write("")
+    label("Circuit profile (from fastest-lap telemetry)")
+    st.markdown(circuit_profile(circuits.loc[event], selected), unsafe_allow_html=True)
+    used = ", ".join(DESCRIPTOR_LABELS[c].lower() for c in selected) or "none"
+    st.markdown(f'<div class="f1-note">Each stint is compared only with itself, so driver, car and strategy cancel out; the model is fitted on 2022-2025 races, and the shaded band is either the 95% interval of the average curve (from resampling races) or the range holding the middle 80% of real stints, which is much wider because stints differ a lot. Besides compound and tyre age it uses track temperature and the circuit characteristics that held up in testing: {used} (marked in red). The other circuit characteristics showed no reliable link to degradation. Treat the curves as typical behaviour, not a strategy call. "Lap time with fuel burn" adds the time gained as the car gets lighter (about {fuel_total_s / totals[event]:.2f} s per lap here), so lap times can fall even while the tyre degrades.</div>', unsafe_allow_html=True)
+
+
 def lap_model_table(report):
     holdout = report["holdout_2025"]
     rows = [("Median baseline", "median_baseline"), ("Formula (fuel and form)", "formula_b_with_fuel_and_form"), ("Ridge regression", "ridge_pre_lap_features"), ("Gradient boosting, pre-lap", "gb_pre_lap"), ("Gradient boosting, pre-stint", "gb_pre_stint"), ("Persistence, last 3 laps", "persistence_last3_laps"), ("Gradient boosting, live", "gb_live")]
@@ -140,6 +222,98 @@ def lap_model_table(report):
         m = holdout[key]
         html += f"<tr><td>{name}</td><td>{m['mae_s']:.3f}</td><td>{m['r2'] if m['r2'] > 0.005 else 0.0:.2f}</td><td>{m['curve_mae_s']:.3f}</td></tr>"
     return html + "</table>"
+
+
+def degradation_table(deg):
+    slopes = deg["holdout_2025"]["+ selected circuit characteristics"]["mean_slope_by_compound"]
+    html = "<table><tr><th>Compound</th><th>Actual (s per lap)</th><th>Predicted (s per lap)</th></tr>"
+    for compound in ["SOFT", "MEDIUM", "HARD"]:
+        html += f"<tr><td>{compound.title()}</td><td>{slopes['true'][compound]:.3f}</td><td>{slopes['pred'][compound]:.3f}</td></tr>"
+    return html + "</table>"
+
+
+def correlation_chart(deg):
+    selected = deg["selection"]["selected_descriptors"]
+    frame = pd.DataFrame({"characteristic": [DESCRIPTOR_LABELS[c] for c in deg["descriptor_spearman_with_severity"]], "correlation": list(deg["descriptor_spearman_with_severity"].values()), "used": ["Used in model" if c in selected else "Not used" for c in deg["descriptor_spearman_with_severity"]]})
+    bars = alt.Chart(frame).mark_bar().encode(x=alt.X("correlation:Q", title="Correlation with measured degradation (25 circuits)"), y=alt.Y("characteristic:N", sort="-x", title=None), color=alt.Color("used:N", scale=alt.Scale(domain=["Used in model", "Not used"], range=["#E10600", "#55555A"]), legend=alt.Legend(orient="top", title=None))).properties(height=330)
+    return themed(bars, "#BDBDC2")
+
+
+def stint_chart(frame, title):
+    colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
+    x = alt.X("age:Q", title="Tyre age (laps)")
+    dots = alt.Chart(frame).mark_circle(size=70, opacity=0.9).encode(x=x, y=alt.Y("actual:Q", title="Lap time vs stint average (s)"), color=alt.Color("Compound:N", scale=colors, legend=None), tooltip=["age", "actual", "predicted"])
+    line = alt.Chart(frame).mark_line(color="#F2F2F2", strokeWidth=2).encode(x=x, y="predicted:Q")
+    trend = alt.Chart(frame).mark_line(color="#8E8E93", strokeWidth=1.5, strokeDash=[5, 4]).encode(x=x, y="trend:Q")
+    return themed(alt.layer(dots, trend, line).properties(height=260, title=alt.TitleParams(title, color="#BDBDC2", fontSize=13, fontWeight="normal")))
+
+
+def stint_grid(stints):
+    labels = list(dict.fromkeys(stints["stint_label"]))
+    for start in range(0, len(labels), 3):
+        row = labels[start : start + 3]
+        for column, name in zip(st.columns(3), row):
+            with column:
+                st.altair_chart(stint_chart(stints[stints["stint_label"] == name], name), use_container_width=True, theme=None)
+
+
+def explorer_tab(model, circuits, panel):
+    c1, c2, c3 = st.columns([1, 2, 1.5])
+    with c1:
+        label("Season")
+        year = st.selectbox("Season", sorted(panel["Year"].unique(), reverse=True), label_visibility="collapsed")
+    with c2:
+        label("Race")
+        events = sorted(panel[panel["Year"] == year]["EventName"].unique())
+        event = st.selectbox("Race", events, label_visibility="collapsed")
+    race = panel[(panel["Year"] == year) & (panel["EventName"] == event)].reset_index(drop=True)
+    with c3:
+        label("Driver")
+        driver = st.selectbox("Driver", sorted(race["Driver"].unique()), label_visibility="collapsed")
+    stints = race[race["Driver"] == driver].reset_index(drop=True)
+    stints["actual"] = degradation.within_stint(stints["y"], stints)
+    stints["predicted"] = degradation.within_stint(pd.Series(model.predict_level(stints, circuits), index=stints.index), stints)
+    stints["Compound"] = stints["Compound"].str.title()
+    stints["trend"] = degradation.within_stint(stints["age"], stints) * degradation.stint_slopes(stints["y"], stints).reindex(pd.MultiIndex.from_frame(stints[degradation.STINT_KEY])).to_numpy()
+    stints["stint_label"] = stints.apply(lambda r: f"Stint {int(r['Stint'])}: {r['Compound']}", axis=1)
+    st.write("")
+    stint_grid(stints)
+    slopes = degradation.stint_slopes(stints["y"], stints)
+    fitted = degradation.stint_slopes(stints["predicted"], stints)
+    html = "<table><tr><th>Stint</th><th>Compound</th><th>Clean laps</th><th>Actual (s per lap)</th><th>Model (s per lap)</th></tr>"
+    for (key, actual), predicted in zip(slopes.items(), fitted.values):
+        group = stints[stints["Stint"] == key[2]]
+        html += f"<tr><td>{int(key[2])}</td><td>{group['Compound'].iloc[0]}</td><td>{len(group)}</td><td>{actual:+.3f}</td><td>{predicted:+.3f}</td></tr>"
+    st.markdown(html + "</table>", unsafe_allow_html=True)
+    st.markdown('<div class="f1-note">Real stints from the data: dots are the driver\'s dry, green-flag laps after removing fuel burn and the stint average, the white line is what the degradation model expects for a typical stint and the dashed grey line is this stint\'s own straight-line trend. Single stints are noisy (traffic, tyre management, a lift for fuel saving); the model describes the typical case. Only stints of at least 8 clean laps are shown.</div>', unsafe_allow_html=True)
+
+
+def circuits_tab(model, circuits, selected):
+    c1, c2, c3 = st.columns([1.5, 1.5, 2])
+    with c1:
+        label("Compound")
+        compound = st.radio("Compound", [c.title() for c in config.COMPOUNDS], horizontal=True, label_visibility="collapsed", key="rank_compound")
+    with c2:
+        label("Track temperature (C)")
+        track_temp = st.slider("Track temperature", 15, 55, 35, label_visibility="collapsed", key="rank_temp")
+    with c3:
+        label("Laps on the tyre")
+        laps_on = st.slider("Laps on the tyre", 10, 30, 20, label_visibility="collapsed")
+    ages = np.array([1, laps_on])
+    frame = pd.DataFrame({"circuit": [e.replace(" Grand Prix", "") for e in circuits.index], "loss": [float(model.curve(compound.upper(), circuits.loc[e], track_temp, ages)[-1]) for e in circuits.index]})
+    st.write("")
+    bars = alt.Chart(frame).mark_bar(color=COMPOUND_COLORS[compound]).encode(x=alt.X("loss:Q", title=f"Predicted lap-time loss after {laps_on} laps (s)"), y=alt.Y("circuit:N", sort="-x", title=None), tooltip=["circuit", alt.Tooltip("loss:Q", format=".2f")]).properties(height=620)
+    st.altair_chart(themed(bars, "#BDBDC2"), use_container_width=True, theme=None)
+    used = ", ".join(DESCRIPTOR_LABELS[c].lower() for c in selected) or "none"
+    st.markdown(f'<div class="f1-note">Circuits ranked by the model for one compound and temperature. With only {used} selected as a circuit effect, differences between circuits are modest and should be read as tendencies, not facts: the 95% bands on the Predictor tab show how much they overlap.</div>', unsafe_allow_html=True)
+
+
+def headline(report, deg):
+    holdout = report["holdout_2025"]
+    tiles = [(f"{holdout['gb_pre_lap']['mae_s']:.2f} s", "Pre-lap error (MAE)"), (f"{holdout['gb_pre_stint']['mae_s']:.2f} s", "Pre-stint error (MAE)"), (f"{holdout['gb_live']['mae_s']:.2f} s", "Live error (MAE)"), (f"{holdout['gb_live']['r2']:.2f}", "Live R&sup2;"), ("1.7x", "Soft vs hard wear")]
+    blocks = "".join(f'<div class="f1-stat"><div class="num">{n}</div><div class="cap">{c}</div></div>' for n, c in tiles)
+    st.markdown(f'<div class="f1-stats" style="grid-template-columns: repeat(5, 1fr)">{blocks}</div>', unsafe_allow_html=True)
+    st.write("")
 
 
 def verify_section(verify):
@@ -155,37 +329,43 @@ def verify_section(verify):
     st.write("")
 
 
-def headline(report):
-    holdout = report["holdout_2025"]
-    coverage = report["prediction_intervals_90"]["live"]["calibrated_coverage"]
-    tiles = [(f"{holdout['gb_pre_lap']['mae_s']:.2f} s", "Pre-lap error (MAE)"), (f"{holdout['gb_pre_stint']['mae_s']:.2f} s", "Pre-stint error (MAE)"), (f"{holdout['gb_live']['mae_s']:.2f} s", "Live error (MAE)"), (f"{holdout['gb_live']['r2']:.2f}", "Live R&sup2;"), (f"{100 * coverage:.0f}%", "Coverage of 90% intervals")]
-    blocks = "".join(f'<div class="f1-stat"><div class="num">{n}</div><div class="cap">{c}</div></div>' for n, c in tiles)
-    st.markdown(f'<div class="f1-stats" style="grid-template-columns: repeat(5, 1fr)">{blocks}</div>', unsafe_allow_html=True)
-    st.write("")
-
-
 def model_tab(verify):
     path = config.RESULTS_DIR / "metrics.json"
-    if not path.exists():
-        st.write("Run evaluate.py to generate results.")
+    deg = read_report()
+    if not path.exists() or not deg:
+        st.write("Run evaluate.py and evaluate_degradation.py to generate results.")
         return
     report = json.loads(path.read_text())
-    headline(report)
+    headline(report, deg)
     label("Lap-time models: unseen 2025 races, trained on 2022-2024")
     st.markdown(lap_model_table(report), unsafe_allow_html=True)
     st.markdown('<div class="f1-note">Gradient boosting implemented from scratch in NumPy. Pre-lap uses everything known at the start of the lap except the driver\'s own previous lap times; pre-stint adds how the driver went in earlier stints of the race; live adds the recent laps of the current stint. Target is lap time relative to the race\'s field-median lap.</div>', unsafe_allow_html=True)
     st.write("")
     verify_section(verify)
+    label("Degradation model: average degradation by compound, unseen 2025 stints")
+    st.markdown(degradation_table(deg), unsafe_allow_html=True)
+    st.write("")
+    label("Which circuit characteristics affect degradation?")
+    st.altair_chart(correlation_chart(deg), use_container_width=True, theme=None)
+    st.markdown('<div class="f1-note">Thirteen characteristics were measured from telemetry. Only elevation change was chosen by cross-validation on the training seasons. Its correlation with measured degradation (0.59) stays significant after allowing for picking the best of thirteen (p = 0.02) and for dropping any one circuit (0.55 to 0.66), but no physical mechanism is proven and it improves held-out stint slopes only modestly. Predicting a circuit\'s degradation from all thirteen fails on circuits left out, because tyre allocation, weather and race events also matter.</div>', unsafe_allow_html=True)
 
 
 def main():
-    st.set_page_config(page_title="F1 Lap Time Prediction", layout="wide")
+    st.set_page_config(page_title="F1 Tyre Degradation", layout="wide")
     st.markdown(CSS, unsafe_allow_html=True)
-    st.markdown('<div class="f1-bar"></div><div class="f1-title">Lap Time Prediction</div><div class="f1-sub">Predict an F1 lap from tyre, fuel, weather and traffic</div>', unsafe_allow_html=True)
+    st.markdown('<div class="f1-bar"></div><div class="f1-title">Tyre Degradation</div><div class="f1-sub">How much slower a stint gets with every lap on the tyre</div>', unsafe_allow_html=True)
     a = load_cached()
-    tab_laps, tab_model = st.tabs(["Lap times", "Model"])
-    with tab_laps:
-        lap_time_tab(a["served"], a["defaults"], a["circuits"], a["example"])
+    tab_predict, tab_explore, tab_circuits, tab_model = st.tabs(["Predictor", "Race explorer", "Circuits", "Model"])
+    with tab_predict:
+        curves_tab, laps_tab = st.tabs(["Tyre curves", "Lap times"])
+        with curves_tab:
+            predictor_tab(a["degradation"], a["circuits"], a["selected"], a["draws"], a["totals"], a["fuel_total_s"], a["spread"])
+        with laps_tab:
+            lap_time_tab(a["served"], a["defaults"], a["circuits"], a["example"])
+    with tab_explore:
+        explorer_tab(a["degradation"], a["circuits"], a["panel"])
+    with tab_circuits:
+        circuits_tab(a["degradation"], a["circuits"], a["selected"])
     with tab_model:
         model_tab(a["verify"])
 

@@ -181,7 +181,7 @@ def plot_tyre_curves(test, preds, fuel_total_s):
     axes[0].legend()
     fig.suptitle("Tyre-age curves on unseen 2025 races")
     fig.tight_layout()
-    fig.savefig(f"{RESULTS_DIR}/tyre_age_curves.png", dpi=150)
+    fig.savefig(f"{RESULTS_DIR}/degradation_curves.png", dpi=150)
     plt.close(fig)
 
 
