@@ -1,0 +1,6 @@
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.7
+streamlit>=1.30
+# Only needed to download raw data with fetch_data.py:
+# fastf1>=3.9
