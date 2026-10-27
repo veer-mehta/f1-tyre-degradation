@@ -11,6 +11,28 @@ How much slower does an F1 car get with every lap on a tyre, and how fast is a l
 - **Circuit characteristics.** Thirteen measures (speed, braking, cornering load, elevation and others) taken from each circuit's fastest-lap telemetry. Cross-validation kept one: elevation change per km.
 - **App.** Predictor (tyre curves with a band for the average or for single stints and a fuel-burn view, and a lap-time predictor that runs the pre-lap and live gradient boosting models on laps you type, paste or upload), Race explorer (real stints against the model), Circuits (ranking) and Model (scores, a button that re-runs the saved models on the 2025 test laps to verify them, and circuit characteristics).
 
+## What the model uses
+
+**From FastF1** (race laps, 2022 to 2025): driver and team, lap number, lap time, tyre compound, tyre life, new or used tyre, stint number, track status (flags and safety cars), pit-in and pit-out laps, deleted and inaccurate laps, position, the time gaps to the cars ahead and behind (worked out from lap end times and positions), and the weather at each lap (air and track temperature, humidity, wind speed, rain). Circuit elevation comes from the fastest-lap telemetry (position X, Y, Z).
+
+**Target:** lap time minus the median lap time of that race, on clean dry green-flag laps only (no lap 1, pit laps, safety car, yellow flags or rain, and nothing slower than 104% of the driver's best).
+
+**Features for gradient boosting**, built from those fields (every feature uses only information from before the lap):
+
+| Group | Features | Tiers |
+|---|---|---|
+| Tyre | tyre life, its square and log, new-tyre flag, tyre life of 2 laps or less, compound (soft, medium, hard), tyre life by compound, stint number | all |
+| Fuel | lap number, race fraction (lap divided by race length) | all |
+| Weather | track temperature, air temperature, humidity, wind speed, track minus air temperature | all |
+| Form | driver and team average pace over their previous 3, 5 and 10 races | all |
+| Traffic | gaps to the cars ahead and behind, position, and a dirty-air flag (under 1.5 s behind another car), all from the previous lap | all |
+| Field context | how the whole field's pace changed recently, laps since the last safety car or yellow flag | all |
+| Circuit | elevation change per km | all |
+| Earlier stints | driver's mean pace in earlier stints of the race, pace at the end of the previous stint, previous stint length | pre-stint, live |
+| Recent laps | previous lap time, mean of the last 3 laps, laps since the previous clean lap | live |
+
+Pre-lap uses the first seven groups, pre-stint adds earlier stints, and live adds recent laps. Pace is always relative to the race median lap.
+
 ## Results
 
 Unseen 2025 races, trained on 2022 to 2024 (24 races, 18,738 laps):
