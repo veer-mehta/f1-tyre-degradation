@@ -90,7 +90,7 @@ f1tyre/                     config, features, gradient_boosting, models, degrada
 cached/                     saved models and data the app loads
 data/                       race laps (92 CSVs) and circuits.csv
 results/                    metrics, figures, summary
-report/                     report.pdf and editable report.docx, with build scripts
+report/                     report.pdf and editable report.docx, with the screenshots they use
 ```
 
 Lap data comes from FastF1 (Formula 1 timing data). Keep the repository private.
