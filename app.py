@@ -3,7 +3,7 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from f1tyre import config, data, degradation, features, models
+from f1tyre import config, data, degradation, features, lapmodel, models
 from f1tyre.circuits import DESCRIPTOR_LABELS
 
 
@@ -57,7 +57,7 @@ def load_model():
     draws_path = config.RESULTS_DIR / "degradation_bootstrap.csv"
     draws = pd.read_csv(draws_path) if draws_path.exists() else None
     totals = laps.groupby("EventName")["TotalLaps"].max().to_dict()
-    return model, circuits, report["final_model"]["circuit_columns"], draws, totals, models.estimate_fuel_effect(laps), panel
+    return model, circuits, report["final_model"]["circuit_columns"], draws, totals, models.estimate_fuel_effect(laps), panel, laps
 
 
 def label(text):
@@ -88,6 +88,108 @@ def circuit_profile(row, selected):
         used = " used" if column in selected else ""
         blocks += f'<div class="f1-stat{used}"><div class="num">{fmt.format(row[column])}</div><div class="cap">{DESCRIPTOR_LABELS[column].split(" (")[0]}</div></div>'
     return f'<div class="f1-stats">{blocks}</div>'
+
+
+@st.cache_resource(show_spinner="Loading the lap-time models")
+def load_lap_models(_laps):
+    return lapmodel.load_models(_laps)
+
+
+def example_rows(laps):
+    latest = laps[laps["Year"] == laps["Year"].max()]
+    sub = latest[latest["EventName"] == "Bahrain Grand Prix"]
+    sub = sub if len(sub) else latest
+    driver, stint = sub.groupby(["Driver", "Stint"]).size().idxmax()
+    stint_laps = sub[(sub["Driver"] == driver) & (sub["Stint"] == stint)].sort_values("LapNumber")
+    overrides = {"stint": int(stint), "driver_ratio": float(stint_laps["driver_form"].iloc[0]), "position": int(round(stint_laps["position_prev"].mean())), "gap_ahead_s": float(stint_laps["gap_ahead_prev"].mean()), "gap_behind_s": float(stint_laps["gap_behind_prev"].mean()), "field_vs_cum": float(stint_laps["field_vs_cum"].mean()), "laps_since_neutral": float(stint_laps["laps_since_neutral"].mean()), "air_temp": float(stint_laps["air_temp"].mean()), "humidity": float(stint_laps["humidity"].mean()), "wind_speed": float(stint_laps["wind_speed"].mean()), "fresh_tyre": bool(stint_laps["fresh_tyre"].iloc[0] > 0.5)}
+    return stint_laps[["LapNumber", "LapTime", "Compound", "TyreLife", "TrackTemp"]].round(3).reset_index(drop=True), overrides
+
+
+def prediction_chart(kept, result):
+    colors = alt.Scale(domain=["Actual", "Pre-lap model", "Live model"], range=["#F2F2F2", "#8E8E93", "#E10600"])
+    frames = [pd.DataFrame({"lap": kept["LapNumber"], "time": kept["LapTime"], "series": "Actual"}).dropna(), pd.DataFrame({"lap": kept["LapNumber"], "time": result["pre_lap"], "series": "Pre-lap model"}), pd.DataFrame({"lap": kept["LapNumber"], "time": result["live"], "series": "Live model"})]
+    long = pd.concat(frames, ignore_index=True)
+    x = alt.X("lap:Q", title="Lap", scale=alt.Scale(zero=False), axis=alt.Axis(format="d", tickMinStep=1))
+    y = alt.Y("time:Q", title="Lap time (s)", scale=alt.Scale(zero=False))
+    color = alt.Color("series:N", scale=colors, legend=alt.Legend(orient="top", title=None, symbolOpacity=1))
+    lines = alt.Chart(long[long["series"] != "Actual"]).mark_line(strokeWidth=2.5).encode(x=x, y=y, color=color)
+    dots = alt.Chart(long[long["series"] == "Actual"]).mark_circle(size=70, opacity=0.9).encode(x=x, y=y, color=color, tooltip=["lap", "time"])
+    return alt.layer(lines, dots).properties(height=320).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2")
+
+
+def result_table(kept, result):
+    html = "<table><tr><th>Lap</th><th>Tyre age</th><th>Compound</th><th>Actual (s)</th><th>Pre-lap (s)</th><th>Live (s)</th><th>Pre-lap error</th><th>Live error</th></tr>"
+    for i in range(len(kept)):
+        actual = kept["LapTime"].iloc[i]
+        known = not np.isnan(actual)
+        pre, live = result["pre_lap"][i], result["live"][i]
+        html += f"<tr><td>{kept['LapNumber'].iloc[i]:.0f}</td><td>{kept['TyreLife'].iloc[i]:.0f}</td><td>{kept['Compound'].iloc[i].title()}</td><td>{actual:.3f}</td>" if known else f"<tr><td>{kept['LapNumber'].iloc[i]:.0f}</td><td>{kept['TyreLife'].iloc[i]:.0f}</td><td>{kept['Compound'].iloc[i].title()}</td><td>-</td>"
+        live_text = f"{live:.3f}" if not np.isnan(live) else "-"
+        live_error = f"{live - actual:+.3f}" if known and not np.isnan(live) else "-"
+        pre_error = f"{pre - actual:+.3f}" if known else "-"
+        html += f"<td>{pre:.3f}</td><td>{live_text}</td><td>{pre_error}</td><td>{live_error}</td></tr>"
+    return html + "</table>"
+
+
+def lap_time_tab(served, defaults, circuits, laps):
+    events = ["None"] + sorted(circuits.index)
+    c1, c2 = st.columns([2, 1.3])
+    with c1:
+        label("Circuit (optional)")
+        circuit = st.selectbox("Circuit", events, index=events.index("Bahrain Grand Prix") if "Bahrain Grand Prix" in events else 0, label_visibility="collapsed", key="lap_circuit")
+    settings = lapmodel.default_settings(defaults, None if circuit == "None" else circuit)
+    climb = float(circuits.loc[circuit, "climb_m_per_km"]) if circuit != "None" else defaults["mean_climb"]
+    label("Laps: edit the table, paste rows or upload a CSV (columns LapNumber, LapTime, Compound, TyreLife, TrackTemp). Leave LapTime blank to forecast a lap")
+    upload = st.file_uploader("Upload a CSV of laps", type="csv", label_visibility="collapsed")
+    example, overrides = example_rows(laps)
+    source = pd.read_csv(upload) if upload is not None else example
+    if "Compound" in source:
+        source["Compound"] = source["Compound"].astype(str).str.upper().str.strip()
+    base = {} if upload is not None else overrides
+    columns = {"LapNumber": st.column_config.NumberColumn("Lap", min_value=1, step=1), "LapTime": st.column_config.NumberColumn("Lap time (s)", format="%.3f"), "Compound": st.column_config.SelectboxColumn("Compound", options=config.COMPOUNDS, required=True), "TyreLife": st.column_config.NumberColumn("Tyre life (laps)", min_value=1, step=1), "TrackTemp": st.column_config.NumberColumn("Track temp (C)", format="%.1f")}
+    source_id = upload.name if upload is not None else "example"
+    table = st.data_editor(source, num_rows="dynamic", use_container_width=True, hide_index=True, column_config=columns, key=f"laps_editor_{source_id}")
+    rows = lapmodel.clean_rows(table)
+    known_times = rows["LapTime"].dropna()
+    fallback = settings["median_s"] or (float(known_times.median()) if len(known_times) else 90.0)
+    with c2:
+        label("Race median lap time (s)")
+        settings["median_s"] = st.number_input("Race median lap time", 40.0, 200.0, round(float(fallback), 3), 0.1, format="%.3f", label_visibility="collapsed", key=f"median_{circuit}_{source_id}")
+    if len(known_times) and abs(float(known_times.median()) - settings["median_s"]) > 0.03 * settings["median_s"]:
+        st.warning(f"Your lap times are around {float(known_times.median()):.1f} s but the race median lap time is {settings['median_s']:.1f} s. Predictions are relative to that median, so set it to the typical lap time of the race your laps come from, or pick the right circuit.")
+    with st.expander("More inputs (for your own laps the defaults are neutral; the example uses the real values)"):
+        key = f"_{source_id}_{circuit}"
+        a1, a2, a3 = st.columns(3)
+        settings["stint"] = a1.number_input("Stint number", 1, 5, int(base.get("stint", 1)), key="stint" + key)
+        settings["fresh_tyre"] = a1.checkbox("New tyre set", base.get("fresh_tyre", True), key="fresh" + key)
+        settings["total_laps"] = a1.number_input("Race length (laps)", 20, 90, int(settings["total_laps"]), key="total" + key)
+        settings["driver_ratio"] = a2.number_input("Driver pace vs field median (ratio, below 1 is faster)", 0.97, 1.05, round(base.get("driver_ratio", 1.0), 3), 0.001, format="%.3f", key="ratio" + key)
+        settings["field_vs_cum"] = a2.number_input("Field pace trend (s, negative = field getting faster)", -3.0, 3.0, round(base.get("field_vs_cum", 0.0), 2), 0.05, key="trend" + key)
+        settings["laps_since_neutral"] = a2.number_input("Laps since the last safety car or yellow flag", 0, 40, int(round(base.get("laps_since_neutral", 40))), key="neutral" + key)
+        settings["position"] = a3.number_input("Position", 1, 20, int(base.get("position", 10)), key="pos" + key)
+        settings["gap_ahead_s"] = a3.number_input("Gap to the car ahead (s)", 0.0, 60.0, round(base.get("gap_ahead_s", 5.0), 2), key="ahead" + key)
+        settings["gap_behind_s"] = a3.number_input("Gap to the car behind (s)", 0.0, 60.0, round(base.get("gap_behind_s", 5.0), 2), key="behind" + key)
+        b1, b2, b3 = st.columns(3)
+        air = b1.number_input("Air temperature (C), 0 to estimate", 0.0, 60.0, round(base.get("air_temp", 0.0), 1), key="air" + key)
+        settings["air_temp"] = air if air > 0 else None
+        settings["humidity"] = b2.number_input("Humidity (%)", 0.0, 100.0, round(base.get("humidity", settings["humidity"]), 1), key="hum" + key)
+        settings["wind_speed"] = b3.number_input("Wind speed (m/s)", 0.0, 20.0, round(base.get("wind_speed", settings["wind_speed"]), 1), key="wind" + key)
+    kept, built = lapmodel.build_features(table, settings, climb, defaults)
+    if kept.empty:
+        st.info("Add at least one lap with a compound, tyre life and track temperature.")
+        return
+    result = lapmodel.predict_laps(served, built, settings["median_s"])
+    result["live"] = np.where(built["prev_delta"].isna().to_numpy(), np.nan, result["live"])
+    st.write("")
+    st.altair_chart(prediction_chart(kept, result), use_container_width=True, theme=None)
+    st.markdown(result_table(kept, result), unsafe_allow_html=True)
+    has_actual = kept["LapTime"].notna().to_numpy()
+    if has_actual.any():
+        pre_mae = float(np.abs(result["pre_lap"][has_actual] - kept["LapTime"].to_numpy()[has_actual]).mean())
+        live_ok = has_actual & ~np.isnan(result["live"])
+        live_mae = float(np.abs(result["live"][live_ok] - kept["LapTime"].to_numpy()[live_ok]).mean()) if live_ok.any() else float("nan")
+        st.markdown(f'<div class="f1-stats" style="grid-template-columns: repeat(3, 1fr); margin-top: 14px"><div class="f1-stat"><div class="num">{int(has_actual.sum())}</div><div class="cap">Laps with a time</div></div><div class="f1-stat"><div class="num">{pre_mae:.3f} s</div><div class="cap">Pre-lap error (MAE)</div></div><div class="f1-stat"><div class="num">{live_mae:.3f} s</div><div class="cap">Live error (MAE)</div></div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="f1-note">The gradient boosting models, written from scratch, predict a lap relative to the race median lap, so a race median is needed to give seconds: it is taken from the circuit (latest season) or from your own laps, and you can change it. The pre-lap model ignores lap times; the live model also uses the lap times you entered before each lap, so it needs an earlier lap and shows a dash for the first one. Inputs you leave out (weather, traffic, driver pace, how the field is trending) take neutral defaults, which makes predictions worse: these race conditions matter, and the example shows the models with the real values filled in. The circuit effect is its elevation change. Both models were trained on all races from 2022 to 2025, so the example stint is part of their training data and fits better than new laps would; the honest error on unseen races is on the Model tab.</div>', unsafe_allow_html=True)
 
 
 def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread):
@@ -272,11 +374,15 @@ def main():
     st.set_page_config(page_title="F1 Tyre Degradation", layout="wide")
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown('<div class="f1-bar"></div><div class="f1-title">Tyre Degradation</div><div class="f1-sub">How much slower a stint gets with every lap on the tyre</div>', unsafe_allow_html=True)
-    model, circuits, selected, draws, totals, fuel_total_s, panel = load_model()
+    model, circuits, selected, draws, totals, fuel_total_s, panel, laps = load_model()
     tab_predict, tab_explore, tab_circuits, tab_model = st.tabs(["Predictor", "Race explorer", "Circuits", "Model"])
     spread = stint_spread(slope_table(model, circuits, panel))
     with tab_predict:
-        predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread)
+        curves_tab, laps_tab = st.tabs(["Tyre curves", "Lap times"])
+        with curves_tab:
+            predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread)
+        with laps_tab:
+            lap_time_tab(load_lap_models(laps), lapmodel.reference_defaults(laps, circuits), circuits, laps)
     with tab_explore:
         explorer_tab(model, circuits, panel)
     with tab_circuits:

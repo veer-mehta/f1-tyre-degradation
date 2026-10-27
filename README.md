@@ -9,7 +9,7 @@ How much slower does an F1 car get with every lap on a tyre, and how fast is a l
 - **Lap-time model.** Gradient boosting (pinball loss, written in `f1tyre/numpy_ml.py`) predicts a lap relative to the race's field-median lap, in three tiers: pre-lap, pre-stint and live.
 - **Degradation model.** Within-stint least squares compares every stint only with itself, so driver, car and strategy cancel out. It gives the compound and circuit curves in the app.
 - **Circuit characteristics.** Thirteen measures (speed, braking, cornering load, elevation and others) taken from each circuit's fastest-lap telemetry. Cross-validation kept one: elevation change per km.
-- **App.** Predictor (curves, a band for the average or for single stints, and a fuel-burn view), Race explorer (real stints against the model), Circuits (ranking) and Model (scores and circuit characteristics).
+- **App.** Predictor (tyre curves with a band for the average or for single stints and a fuel-burn view, and a lap-time predictor that runs the pre-lap and live gradient boosting models on laps you type, paste or upload), Race explorer (real stints against the model), Circuits (ranking) and Model (scores and circuit characteristics).
 
 ## Results
 
@@ -51,6 +51,7 @@ Full tables, bootstrap intervals and ablations: `results/summary.md` and `report
 pip install -r requirements.txt
 python -m unittest discover -s tests -t .   # tests, including a no-future-leakage check
 streamlit run app.py                        # the app
+python train_models.py                      # refit the saved lap-time models in models/ (about one minute)
 python evaluate.py                          # lap-level scores (about 10 minutes)
 python evaluate_degradation.py              # degradation model and circuit analysis
 python predict_demo.py "Bahrain Grand Prix" 35
@@ -62,8 +63,9 @@ The data is in `data/`, so no F1 account is needed. To download it again, instal
 
 ```
 app.py, evaluate*.py, predict_demo.py, fetch_*.py
-f1tyre/      config, data, features, circuits, degradation, numpy_ml, models, metrics
+f1tyre/      config, data, features, circuits, degradation, lapmodel, numpy_ml, models, metrics
 tests/       unit tests
+models/      saved pre-lap and live gradient boosting models used by the app
 data/        race laps (92 CSVs) and circuits.csv
 results/     metrics, figures, summary
 report/      report.pdf and editable report.docx, with build scripts
