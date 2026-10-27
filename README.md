@@ -39,7 +39,7 @@ f1tyre/
 tests/                 unit tests (including a no-future-leakage test)
 data/                  lap data, one CSV per race (2022-2025)
 results/               metrics.json, summary.md, figures
-report/                make_report.py, report.pdf, app screenshots
+report/                report.pdf and editable report.docx (with their build scripts), app screenshots
 reference_sklearn_xgboost/   earlier scikit-learn and XGBoost version, for comparison
 ```
 
@@ -51,7 +51,8 @@ python -m unittest discover -s tests -t .      # unit tests
 python evaluate.py                             # all scores and figures (about 10 minutes)
 streamlit run app.py                           # interactive app
 python predict_demo.py "Bahrain Grand Prix" 35 25
-python report/make_report.py                   # rebuild the PDF report (needs node and playwright)
+python report/make_report.py                   # rebuild report.pdf (needs node and playwright)
+node report/make_report_docx.js                # rebuild the editable report.docx (needs node and the docx package)
 ```
 
 The data is already in `data/`. To download it again, install `fastf1`, copy `.env.example` to `.env`, fill in an F1 account (FastF1 3.9 requires one) and run `python fetch_data.py` (or `python fetch_data.py 2025`). `.env` is git-ignored.
