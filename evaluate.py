@@ -49,6 +49,14 @@ def score(test, pred, fuel_total_s=None):
     return {k: round(float(v), 4) for k, v in out.items()}
 
 
+def r4(value):
+    return round(float(value), 4)
+
+
+def mae_r2(y, pred):
+    return {"mae_s": r4(models.mae(y, pred)), "r2": r4(models.r2(y, pred))}
+
+
 def assign_folds(laps):
     rng = np.random.RandomState(SEED)
     fold_of_race = {}
@@ -73,12 +81,6 @@ def predict_all(train, test):
     return preds, fitted, fuel_total_s
 
 
-def holdout(train, test):
-    preds, fitted, fuel_total_s = predict_all(train, test)
-    scores = {name: score(test, preds[name], fuel_total_s) for name in MODEL_ORDER}
-    return scores, preds, fitted, fuel_total_s
-
-
 def mixed_year_cv(laps):
     folds = assign_folds(laps)
     oof = {name: np.zeros(len(laps)) for name in MODEL_ORDER}
@@ -93,8 +95,8 @@ def mixed_year_cv(laps):
     out = {}
     for name in MODEL_ORDER:
         out[name] = score(laps, oof[name])
-        out[name]["fold_mae_std"] = round(float(np.std(fold_mae[name], ddof=1)), 4)
-        out[name]["per_year_mae"] = {int(y): round(float(models.mae(laps.loc[laps["Year"] == y, "delta"], oof[name][(laps["Year"] == y).values])), 4) for y in sorted(laps["Year"].unique())}
+        out[name]["fold_mae_std"] = r4(np.std(fold_mae[name], ddof=1))
+        out[name]["per_year_mae"] = {int(y): r4(models.mae(laps.loc[laps["Year"] == y, "delta"], oof[name][(laps["Year"] == y).values])) for y in sorted(laps["Year"].unique())}
     return out
 
 
@@ -103,10 +105,7 @@ def leave_one_year_out(laps):
     for year in sorted(laps["Year"].unique()):
         is_test = (laps["Year"] == year).values
         train, test = laps[~is_test].reset_index(drop=True), laps[is_test].reset_index(drop=True)
-        out[int(year)] = {}
-        for tier in config.TIERS:
-            pred = models.fit_gb(train, config.TIERS[tier], tier).predict(test[config.TIERS[tier]])
-            out[int(year)][f"gb_{tier}"] = {"mae_s": round(float(models.mae(test["delta"], pred)), 4), "r2": round(float(models.r2(test["delta"], pred)), 4)}
+        out[int(year)] = {f"gb_{tier}": mae_r2(test["delta"], models.fit_gb(train, config.TIERS[tier], tier).predict(test[config.TIERS[tier]])) for tier in config.TIERS}
         print("leave-one-year-out", year, flush=True)
     return out
 
@@ -115,24 +114,25 @@ def later_stints(test, preds):
     mask = (test["stint"] >= 2).to_numpy()
     subset = test[mask].reset_index(drop=True)
     names = ["median_baseline", "persistence_last3_laps", "gb_pre_lap", "gb_pre_stint", "gb_live"]
-    return {"share_of_test_laps": round(float(mask.mean()), 4), "scores": {name: score(subset, preds[name][mask]) for name in names}}
+    return {"share_of_test_laps": r4(mask.mean()), "scores": {name: score(subset, preds[name][mask]) for name in names}}
 
 
-def sanity_checks(train, test, preds, fitted):
+def label_shuffle(train, test):
     cols = config.TIERS["pre_lap"]
-    shuffled = train.copy()
-    shuffled["delta"] = np.random.RandomState(SEED).permutation(train["delta"].values)
-    shuffle_pred = models.fit_gb(shuffled, cols, "pre_lap").predict(test[cols])
-    out = {"label_shuffle": {"mae_s": round(float(models.mae(test["delta"], shuffle_pred)), 4), "r2": round(float(models.r2(test["delta"], shuffle_pred)), 4)}}
-    out["train_vs_test"] = {}
-    for tier in config.TIERS:
-        train_pred = fitted[tier].predict(train[config.TIERS[tier]])
-        out["train_vs_test"][tier] = {"train_mae_s": round(float(models.mae(train["delta"], train_pred)), 4), "test_mae_s": round(float(models.mae(test["delta"], preds[f"gb_{tier}"])), 4)}
-    out["ablation_pre_lap_test_mae_s"] = {"all_features": round(float(models.mae(test["delta"], preds["gb_pre_lap"])), 4)}
+    shuffled = train.assign(delta=np.random.RandomState(SEED).permutation(train["delta"].values))
+    return mae_r2(test["delta"], models.fit_gb(shuffled, cols, "pre_lap").predict(test[cols]))
+
+
+def train_vs_test(train, test, preds, fitted):
+    return {tier: {"train_mae_s": r4(models.mae(train["delta"], fitted[tier].predict(train[config.TIERS[tier]]))), "test_mae_s": r4(models.mae(test["delta"], preds[f"gb_{tier}"]))} for tier in config.TIERS}
+
+
+def ablation(train, test, preds):
+    cols = config.TIERS["pre_lap"]
+    out = {"all_features": r4(models.mae(test["delta"], preds["gb_pre_lap"]))}
     for group, group_cols in config.FEATURE_GROUPS.items():
         kept = [c for c in cols if c not in group_cols]
-        pred = models.fit_gb(train, kept, "pre_lap").predict(test[kept])
-        out["ablation_pre_lap_test_mae_s"][f"drop_{group}"] = round(float(models.mae(test["delta"], pred)), 4)
+        out[f"drop_{group}"] = r4(models.mae(test["delta"], models.fit_gb(train, kept, "pre_lap").predict(test[kept])))
         print("ablation", group, flush=True)
     return out
 
@@ -147,15 +147,15 @@ def race_bootstrap(test, preds):
         rows = np.concatenate([rows_of[r] for r in rng.choice(races, size=len(races), replace=True)])
         for name in MODEL_ORDER:
             draws[name].append(abs_err[name][rows].mean())
-    ci = {name: [round(float(np.percentile(draws[name], 2.5)), 4), round(float(np.percentile(draws[name], 97.5)), 4)] for name in MODEL_ORDER}
+    interval = lambda values: [r4(np.percentile(values, 2.5)), r4(np.percentile(values, 97.5))]
     gain = {}
     for name in ["gb_pre_lap", "gb_pre_stint", "gb_live"]:
         diff = np.array(draws["formula_b_with_fuel_and_form"]) - np.array(draws[name])
-        gain[name] = {"mean_s": round(float(diff.mean()), 4), "ci95": [round(float(np.percentile(diff, 2.5)), 4), round(float(np.percentile(diff, 97.5)), 4)], "share_better": round(float((diff > 0).mean()), 3)}
-    return {"mae_ci95": ci, "gain_over_formula_b": gain}
+        gain[name] = {"mean_s": r4(diff.mean()), "ci95": interval(diff), "share_better": round(float((diff > 0).mean()), 3)}
+    return {"mae_ci95": {name: interval(draws[name]) for name in MODEL_ORDER}, "gain_over_formula_b": gain}
 
 
-def plot_results(test, preds, fuel_total_s):
+def plot_predictions(test, preds):
     fig, axes = plt.subplots(1, len(config.TIERS), figsize=(5.4 * len(config.TIERS), 5))
     for ax, tier in zip(axes, config.TIERS):
         ax.scatter(test["delta"], preds[f"gb_{tier}"], s=2, alpha=0.15)
@@ -164,6 +164,9 @@ def plot_results(test, preds, fuel_total_s):
     fig.tight_layout()
     fig.savefig(f"{RESULTS_DIR}/pred_vs_actual.png", dpi=150)
     plt.close(fig)
+
+
+def plot_tyre_curves(test, preds, fuel_total_s):
     fuel = fuel_total_s * test["LapNumber"] / test["TotalLaps"]
     fig, axes = plt.subplots(1, 3, figsize=(14, 4), sharey=True)
     for ax, compound in zip(axes, config.COMPOUNDS):
@@ -182,44 +185,22 @@ def plot_results(test, preds, fuel_total_s):
     plt.close(fig)
 
 
-def write_summary(report):
-    lines = ["# Scores (generated by evaluate.py)", "", "## 2025 holdout (train 2022-2024)", "", "| Model | MAE (s) | Median AE (s) | R2 | Curve MAE (s) | Slope corr | Slope MAE (s/lap) |", "|---|---|---|---|---|---|---|"]
-    for name in MODEL_ORDER:
-        m = report["holdout_2025"][name]
-        lines.append(f"| {name} | {m['mae_s']} | {m['median_ae_s']} | {m['r2']} | {m['curve_mae_s']} | {m['slope_corr']} | {m['slope_mae_s_per_lap']} |")
-    lines += ["", "## Mixed-year 5-fold CV (all 90 races)", "", "| Model | MAE (s) | R2 | Fold MAE std | MAE 2022 / 2023 / 2024 / 2025 |", "|---|---|---|---|---|"]
-    for name in MODEL_ORDER:
-        m = report["mixed_year_cv"][name]
-        years = " / ".join(str(v) for v in m["per_year_mae"].values())
-        lines.append(f"| {name} | {m['mae_s']} | {m['r2']} | {m['fold_mae_std']} | {years} |")
-    lines += ["", "## Leave-one-year-out MAE (R2)", "", "| Held-out year | pre-lap | pre-stint | live |", "|---|---|---|---|"]
-    for year, m in report["leave_one_year_out"].items():
-        lines.append(f"| {year} | {m['gb_pre_lap']['mae_s']} ({m['gb_pre_lap']['r2']}) | {m['gb_pre_stint']['mae_s']} ({m['gb_pre_stint']['r2']}) | {m['gb_live']['mae_s']} ({m['gb_live']['r2']}) |")
-    later = report["holdout_2025_stint_2_plus"]
-    lines += ["", f"## 2025 holdout, laps in stint 2 or later ({100 * later['share_of_test_laps']:.0f}% of laps)", "", "| Model | MAE (s) | Median AE (s) | R2 |", "|---|---|---|---|"]
-    for name, m in later["scores"].items():
-        lines.append(f"| {name} | {m['mae_s']} | {m['median_ae_s']} | {m['r2']} |")
-    open(f"{RESULTS_DIR}/summary.md", "w").write("\n".join(lines) + "\n")
-
-
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
     laps = features.build_lap_table(features.load_laps())
     train, test = features.split_years(laps)
     print(f"clean laps {len(laps)}, races {laps['race_id'].nunique()}, train {len(train)}, test {len(test)}", flush=True)
-    scores, preds, fitted, fuel_total_s = holdout(train, test)
-    report = {"fuel_effect_total_s_fitted": round(fuel_total_s, 3), "holdout_2025": scores}
-    print(json.dumps(scores, indent=1), flush=True)
+    preds, fitted, fuel_total_s = predict_all(train, test)
+    report = {"fuel_effect_total_s_fitted": round(fuel_total_s, 3), "holdout_2025": {name: score(test, preds[name], fuel_total_s) for name in MODEL_ORDER}}
     report["holdout_2025_stint_2_plus"] = later_stints(test, preds)
     report["mixed_year_cv"] = mixed_year_cv(laps)
     report["leave_one_year_out"] = leave_one_year_out(laps)
-    report["sanity_checks"] = sanity_checks(train, test, preds, fitted)
-    report["sanity_checks"].update(race_bootstrap(test, preds))
+    report["sanity_checks"] = {"label_shuffle": label_shuffle(train, test), "train_vs_test": train_vs_test(train, test, preds, fitted), "ablation_pre_lap_test_mae_s": ablation(train, test, preds), **race_bootstrap(test, preds)}
     report["prediction_intervals_90"] = {tier: models.conformal_interval(train, test, config.TIERS[tier], tier) for tier in config.TIERS}
     with open(f"{RESULTS_DIR}/metrics.json", "w") as f:
         json.dump(report, f, indent=2)
-    write_summary(report)
-    plot_results(test, preds, fuel_total_s)
+    plot_predictions(test, preds)
+    plot_tyre_curves(test, preds, fuel_total_s)
     print("done", flush=True)
 
 

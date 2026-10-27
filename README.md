@@ -65,7 +65,7 @@ Soft wears about 1.7 times faster than hard, in every season. The curve is a par
 
 **Circuit characteristic.** Elevation change per km correlates 0.59 with measured circuit severity (p = 0.02 after allowing for picking the best of 13 characteristics, and 0.55 to 0.66 when any one circuit is dropped). No physical mechanism is proven.
 
-Full tables, bootstrap intervals and ablations: `results/summary.md` and `report/report.pdf`.
+Full tables, bootstrap intervals and ablations: `results/metrics.json` and `report/report.pdf`.
 
 ## Run it
 
