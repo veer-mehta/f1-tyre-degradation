@@ -169,7 +169,8 @@ def stint_chart(frame):
     x = alt.X("age:Q", title="Tyre age (laps)")
     dots = alt.Chart(frame).mark_circle(size=70, opacity=0.9).encode(x=x, y=alt.Y("actual:Q", title="Lap time vs stint average, fuel-corrected (s)"), color=alt.Color("Compound:N", scale=colors, legend=None), tooltip=["age", "actual", "predicted"])
     line = alt.Chart(frame).mark_line(color="#F2F2F2", strokeWidth=2).encode(x=x, y="predicted:Q")
-    return alt.layer(dots, line).properties(height=260).facet(column=alt.Column("stint_label:N", title=None, header=alt.Header(labelColor="#BDBDC2", labelFontSize=12))).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
+    trend = alt.Chart(frame).mark_line(color="#8E8E93", strokeWidth=1.5, strokeDash=[5, 4]).encode(x=x, y="trend:Q")
+    return alt.layer(dots, trend, line).properties(height=260).facet(column=alt.Column("stint_label:N", title=None, header=alt.Header(labelColor="#BDBDC2", labelFontSize=12))).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
 
 
 def explorer_tab(model, circuits, panel):
@@ -189,6 +190,7 @@ def explorer_tab(model, circuits, panel):
     stints["actual"] = degradation.within_stint(stints["y"], stints)
     stints["predicted"] = degradation.within_stint(pd.Series(model.predict_level(stints, circuits), index=stints.index), stints)
     stints["Compound"] = stints["Compound"].str.title()
+    stints["trend"] = degradation.within_stint(stints["age"], stints) * degradation.stint_slopes(stints["y"], stints).reindex(pd.MultiIndex.from_frame(stints[degradation.STINT_KEY])).to_numpy()
     stints["stint_label"] = stints.apply(lambda r: f"Stint {int(r['Stint'])}: {r['Compound']}", axis=1)
     st.write("")
     st.altair_chart(stint_chart(stints), use_container_width=True, theme=None)
@@ -199,7 +201,7 @@ def explorer_tab(model, circuits, panel):
         group = stints[stints["Stint"] == key[2]]
         html += f"<tr><td>{int(key[2])}</td><td>{group['Compound'].iloc[0]}</td><td>{len(group)}</td><td>{actual:+.3f}</td><td>{predicted:+.3f}</td></tr>"
     st.markdown(html + "</table>", unsafe_allow_html=True)
-    st.markdown('<div class="f1-note">Real stints from the data: dots are the driver\'s dry, green-flag laps after removing fuel burn and the stint average, and the white line is what the degradation model expects. Single stints are noisy (traffic, tyre management, a lift for fuel saving); the model describes the typical case. Only stints of at least 8 clean laps are shown.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="f1-note">Real stints from the data: dots are the driver\'s dry, green-flag laps after removing fuel burn and the stint average, the white line is what the degradation model expects for a typical stint and the dashed grey line is this stint\'s own straight-line trend. The Model tab shows how the typical line compares with all stints. Single stints are noisy (traffic, tyre management, a lift for fuel saving); the model describes the typical case. Only stints of at least 8 clean laps are shown.</div>', unsafe_allow_html=True)
 
 
 def circuits_tab(model, circuits, selected):
@@ -222,6 +224,32 @@ def circuits_tab(model, circuits, selected):
     st.markdown(f'<div class="f1-note">Circuits ranked by the model for one compound and temperature. With only {used} selected as a circuit effect, differences between circuits are modest and should be read as tendencies, not facts: the 95% bands on the Predictor tab show how much they overlap.</div>', unsafe_allow_html=True)
 
 
+@st.cache_data(show_spinner=False)
+def slope_table(_model, _circuits, _panel):
+    pred = pd.Series(_model.predict_within(_panel, _circuits), index=_panel.index)
+    keyed = _panel.groupby(degradation.STINT_KEY)
+    return pd.DataFrame({"actual": degradation.stint_slopes(_panel["y"], _panel), "model": degradation.stint_slopes(pred, _panel), "Compound": keyed["Compound"].first().str.title(), "laps": keyed["y"].size()}).reset_index(drop=True)
+
+
+def slope_check_chart(table):
+    colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
+    x_scale = alt.Scale(domain=[0, 0.12], nice=False, clamp=True)
+    y_scale = alt.Scale(domain=[-0.1, 0.3], nice=False, clamp=True)
+    dots = alt.Chart(table).mark_circle(size=22, opacity=0.35).encode(x=alt.X("model:Q", title="Model slope (s per lap)", scale=x_scale), y=alt.Y("actual:Q", title="Actual slope of the stint (s per lap)", scale=y_scale), color=alt.Color("Compound:N", scale=colors, legend=alt.Legend(orient="top", title=None, symbolOpacity=1)), tooltip=["Compound", "laps", alt.Tooltip("actual:Q", format=".3f"), alt.Tooltip("model:Q", format=".3f")])
+    diagonal = alt.Chart(pd.DataFrame({"a": [0.0, 0.12]})).mark_line(color="#F2F2F2", strokeDash=[5, 4]).encode(x="a:Q", y="a:Q")
+    return alt.layer(dots, diagonal).properties(height=340).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2")
+
+
+def slope_check(table):
+    by_compound = table.groupby("Compound")[["actual", "model"]].mean()
+    rows = "".join(f"<tr><td>{c}</td><td>{by_compound.loc[c, 'actual']:.3f}</td><td>{by_compound.loc[c, 'model']:.3f}</td></tr>" for c in ["Soft", "Medium", "Hard"])
+    short = table[table["laps"] <= 18]
+    long = table[table["laps"] > 25]
+    html = f"<table><tr><th>Compound</th><th>Average actual stint (s per lap)</th><th>Model (s per lap)</th></tr>{rows}</table>"
+    note = f'Over all {len(table):,} stints the model is on average {100 * (1 - table["model"].mean() / table["actual"].mean()):.0f}% below the average stint slope, and {100 * (table["actual"] > table["model"]).mean():.0f}% of stints are steeper than the line. Stints of 18 laps or fewer average {short["actual"].mean():.3f} s per lap against {short["model"].mean():.3f} modelled; stints over 25 laps average {long["actual"].mean():.3f} against {long["model"].mean():.3f}. The fit weighs every lap equally, so long stints dominate, and long stints are the gentle ones, because tyres that wear fast are changed early. Individual stints vary a lot (correlation between modelled and actual slope {table["actual"].corr(table["model"]):.2f}), so the line describes the typical lap, not each stint. These stints were used to fit the model, so this is not a held-out check.'
+    return html, note
+
+
 def headline(report, deg):
     holdout = report["holdout_2025"]
     tiles = [(f"{holdout['gb_pre_lap']['mae_s']:.2f} s", "Pre-lap error (MAE)"), (f"{holdout['gb_pre_stint']['mae_s']:.2f} s", "Pre-stint error (MAE)"), (f"{holdout['gb_live']['mae_s']:.2f} s", "Live error (MAE)"), (f"{holdout['gb_live']['r2']:.2f}", "Live R&sup2;"), ("1.7x", "Soft vs hard wear")]
@@ -230,7 +258,7 @@ def headline(report, deg):
     st.write("")
 
 
-def model_tab():
+def model_tab(model, circuits, panel):
     path = config.RESULTS_DIR / "metrics.json"
     deg = read_report()
     if not path.exists() or not deg:
@@ -250,6 +278,13 @@ def model_tab():
     if check is not None:
         st.altair_chart(check, use_container_width=True, theme=None)
     st.write("")
+    label("Does the line fit every stint? Actual against modelled slope, all stints 2022-2025")
+    table = slope_table(model, circuits, panel)
+    st.altair_chart(slope_check_chart(table), use_container_width=True, theme=None)
+    html, note = slope_check(table)
+    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(f'<div class="f1-note">{note}</div>', unsafe_allow_html=True)
+    st.write("")
     label("Which circuit characteristics affect degradation?")
     st.altair_chart(correlation_chart(deg), use_container_width=True, theme=None)
     st.markdown('<div class="f1-note">Thirteen characteristics were measured from telemetry. Only elevation change was chosen by cross-validation on the training seasons, and it improves held-out stint slopes modestly. Predicting a circuit\'s degradation from all thirteen fails on circuits left out, because tyre allocation, weather and race events also matter.</div>', unsafe_allow_html=True)
@@ -268,7 +303,7 @@ def main():
     with tab_circuits:
         circuits_tab(model, circuits, selected)
     with tab_model:
-        model_tab()
+        model_tab(model, circuits, panel)
 
 
 main()

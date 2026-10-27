@@ -336,6 +336,16 @@ To show uncertainty we resample whole races with replacement 200 times, refit th
 
 We tested piecewise-linear ("hinge") shapes that can create a flat start or a late cliff. We chose between shapes by **curve fidelity** on held-out data: the mean absolute gap between the observed average loss-versus-age curve and the model's. On unseen 2025 stints the parabola scored 0.136 s against 0.145 to 0.147 s for the flexible ones, so the data do not support a cliff. Do not claim "tyres have no cliff". Claim "within this lap range and data, a smooth curve fits as well or better than hinges".
 
+### 6.7b Does the line fit every stint? (a question you will get)
+
+Looking at single stints in the Race explorer, the white model line often looks flatter than the dots. We measured it over all 3,353 stints:
+
+- On average the model's stint slope is about 14% below the average actual stint slope (soft 0.068 against 0.083 s per lap, medium 0.050 against 0.057, hard 0.041 against 0.046), and 53% of stints are steeper than the line. The bias is worst for short stints (18 laps or fewer: 0.069 actual against 0.055 modelled) and absent for long ones (over 25 laps: 0.035 against 0.037).
+- Cause 1, weighting. Least squares weighs every lap equally, so a 45-lap stint counts far more than a 10-lap one. Long stints are the gentle ones, because tyres that wear fast are changed early (a selection effect). The fit therefore describes the typical lap, not the typical stint.
+- Cause 2, dispersion. Stint slopes vary a lot and the model explains little of that variation (correlation between modelled and actual slope 0.40). Any single stint is steeper or flatter than the typical line.
+- What we tried. Weighting every stint equally removes the bias (calibration slope 1.01) but fits unseen 2025 stints worse (curve error 0.29 against 0.18 s) and makes the circuit characteristic stop helping, so we kept the lap-weighted fit. Adding the stint's length as a covariate helps slightly (calibration 1.53 to 1.31) but is not usable for planning, because a stint's length is a consequence of its wear, not a choice that changes it. Season terms did not improve held-out error.
+- What to say: the line is the conditional average, the dots show individual variation, and the Model tab shows the full picture, so the limitation is stated, not hidden.
+
 ### 6.8 Evaluating degradation (`evaluate`, `curve_table`, `curve_fidelity`)
 
 - **Within-stint R2** is computed on the centred `y`. It is about 0.31, which is much lower than lap-level R2 because the response has had the easy parts removed (driver, car, fuel): what is left is noisy.

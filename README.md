@@ -71,7 +71,7 @@ reference_sklearn_xgboost/   earlier scikit-learn and XGBoost version, for compa
 - A single lap carries about 0.33 s of random noise, so lap-level R2 tops out near 0.9. Most pre-lap error is each driver's race-specific offset.
 - The target is relative to the field-median lap, which comes from the race itself.
 - Circuit effects are weak: with 25 circuits, only elevation change held up, and predicting a circuit's severity from all thirteen fails on unseen circuits.
-- The curves describe typical behaviour, not a strategy recommendation. Single stints are noisy.
+- The curves describe typical behaviour, not a strategy recommendation. Single stints vary a lot (modelled and actual stint slopes correlate at 0.40), and because the fit weighs every lap equally and long stints are the gentle ones, the line sits about 14% below the average stint slope (soft 0.068 against 0.083 s per lap). The Model tab plots all 3,353 stints. Weighting stints equally removes that gap but fits unseen 2025 stints worse, so it was not adopted.
 - Some design choices were made while looking at 2025, so that holdout is slightly optimistic. Cross-validation is the better estimate.
 
 Lap data comes from FastF1 (Formula 1 timing data). Keep the repository private.
