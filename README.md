@@ -10,7 +10,7 @@ How much slower does an F1 car get with every lap on a tyre, and how fast is a l
 - **Degradation model.** Within-stint least squares compares every stint only with itself, so driver, car and strategy cancel out. It gives the compound and circuit curves in the app.
 - **Circuit characteristics.** Thirteen measures (speed, braking, cornering load, elevation and others) taken from each circuit's fastest-lap telemetry. Cross-validation kept one: elevation change per km.
 - **Tyre cliff detection.** Every stint of 20 or more laps is tested for a late speed-up in lap-time loss, with stints that slow down by the same amount as the noise reference.
-- **App.** Predictor (curves, a band for the average or for single stints, and a fuel-burn view), Race explorer (real stints against the model, with cliffs marked), Circuits (ranking) and Model (scores, fit against every stint, cliff results).
+- **App.** Predictor (curves, a band for the average or for single stints, and a fuel-burn view), Race explorer (real stints against the model, with cliffs marked), Circuits (ranking) and Model (scores, cliff results, circuit characteristics).
 
 ## Results
 
@@ -40,7 +40,7 @@ Degradation on unseen 2025 stints (seconds lost per lap of tyre age):
 | Medium | 0.050 | 0.049 |
 | Hard | 0.038 | 0.038 |
 
-Soft wears about 1.7 times faster than hard, in every season. The curve is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). It is the average lap: over all 3,353 stints it sits 13% below the average stint slope, because long stints dominate the fit and are the gentle ones, and single stints differ a lot. The app plots every stint against the model.
+Soft wears about 1.7 times faster than hard, in every season. The curve is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). It is the average lap: over all 3,353 stints it sits 13% below the average stint slope, because long stints dominate the fit and are the gentle ones, and single stints differ a lot.
 
 **Tyre cliff.** Each stint of 20 or more laps is fitted with a straight line and with a line that steepens at one age. A stint that speeds up by at least 0.1 s per lap, at an age in the second half of the stint, is a cliff. Stints that slow down by the same amount are the noise reference.
 

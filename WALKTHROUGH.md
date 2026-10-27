@@ -344,7 +344,7 @@ Looking at single stints in the Race explorer, the white model line often looks 
 - Cause 1, weighting. Least squares weighs every lap equally, so a 45-lap stint counts far more than a 10-lap one. Long stints are the gentle ones, because tyres that wear fast are changed early (a selection effect). The fit therefore describes the typical lap, not the typical stint.
 - Cause 2, dispersion. Stint slopes vary a lot and the model explains little of that variation (correlation between modelled and actual slope 0.40). Any single stint is steeper or flatter than the typical line.
 - What we tried. Weighting every stint equally removes the bias (calibration slope 1.01) but fits unseen 2025 stints worse (curve error 0.29 against 0.18 s) and makes the circuit characteristic stop helping, so we kept the lap-weighted fit. Adding the stint's length as a covariate helps slightly (calibration 1.53 to 1.31) but is not usable for planning, because a stint's length is a consequence of its wear, not a choice that changes it. Season terms did not improve held-out error.
-- What to say: the line is the conditional average, the dots show individual variation, and the Model tab shows the full picture, so the limitation is stated, not hidden.
+- What to say: the line is the conditional average, the dots show individual variation, and the single-stint band in the Predictor and the trend lines in the Race explorer show that spread, so the limitation is stated, not hidden.
 
 ### 6.7c Tyre cliff detection (`f1tyre/cliff.py`)
 
@@ -453,7 +453,7 @@ Reading the result table: within-stint R2 0.31 and slope correlation 0.35 with t
 - **Predictor.** Choose circuit and track temperature. Calls `model.curve` for each compound and `curve_band` for the shaded 95% interval. The "Lap time with fuel burn" view subtracts `fuel_total / race_laps * (age - 1)`, so you see the net effect of wear plus fuel, which can go down. The tiles give the loss after 10, 20 and 30 laps. The circuit profile shows telemetry-derived measures, with the one used by the model marked red.
 - **Race explorer.** Pick a season, race and driver. For each stint of 8 or more clean laps, plots actual fuel-corrected laps (minus the stint mean) against the model's within-stint prediction, with a table of actual and model seconds per lap.
 - **Circuits.** Ranks the 25 circuits by predicted loss after N laps for a chosen compound and temperature. Differences are modest because only elevation is a circuit input (plus temperature at a fixed value), so treat it as tendency.
-- **Model.** Headline tiles and result tables from `metrics.json` and `degradation.json`, the reality-check chart and the circuit correlation chart.
+- **Model.** Headline tiles and result tables from `metrics.json` and `degradation.json`, the cliff results and the circuit correlation chart.
 
 Design choices worth knowing: Altair charts for the dark F1 theme; all numbers come from the saved results files and the fitted model, none are hard-coded except the "1.7x" tile (soft over hard wear).
 
