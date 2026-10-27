@@ -61,7 +61,7 @@ Degradation on unseen 2025 stints (seconds lost per lap of tyre age):
 | Medium | 0.050 | 0.049 |
 | Hard | 0.038 | 0.038 |
 
-Soft wears about 1.7 times faster than hard, in every season. The curve is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). It is the average lap: over all 3,353 stints it sits 13% below the average stint slope, because long stints dominate the fit and are the gentle ones, and single stints differ a lot.
+On 2025 stints soft wears about 1.7 times faster than hard; across held-out years the ratio is between 1.5 and 1.8, and soft is always the fastest to wear. The curve is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). It is the average lap: over all 3,353 stints it sits 13% below the average stint slope, because long stints dominate the fit and are the gentle ones, and single stints differ a lot.
 
 **Circuit characteristic.** Elevation change per km correlates 0.59 with measured circuit severity (p = 0.02 after allowing for picking the best of 13 characteristics, and 0.55 to 0.66 when any one circuit is dropped). No physical mechanism is proven.
 
