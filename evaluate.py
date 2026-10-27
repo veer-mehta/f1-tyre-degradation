@@ -14,7 +14,7 @@ RESULTS_DIR = config.RESULTS_DIR
 N_FOLDS = 5
 N_BOOTSTRAP = 1000
 SEED = 42
-MODEL_ORDER = ["median_baseline", "persistence_last3_laps", "formula_a_calculator_style", "formula_b_with_fuel_and_form", "ridge_pre_lap_features", "gbt_pre_lap", "gbt_live"]
+MODEL_ORDER = ["median_baseline", "persistence_last3_laps", "formula_a_calculator_style", "formula_b_with_fuel_and_form", "ridge_pre_lap_features", "gb_pre_lap", "gb_pre_stint", "gb_live"]
 
 
 def assign_folds(laps):
@@ -36,8 +36,8 @@ def predict_all(train, test):
     preds["ridge_pre_lap_features"] = ml.RidgeRegression().fit(train[cols].values, train["delta"].values).predict(test[cols].values)
     fitted = {}
     for tier in config.TIERS:
-        fitted[tier] = models.fit_gbt(train, config.TIERS[tier], tier)
-        preds[f"gbt_{tier}"] = fitted[tier].predict(test[config.TIERS[tier]])
+        fitted[tier] = models.fit_gb(train, config.TIERS[tier], tier)
+        preds[f"gb_{tier}"] = fitted[tier].predict(test[config.TIERS[tier]])
     return preds, fitted, fuel_total_s
 
 
@@ -73,26 +73,33 @@ def leave_one_year_out(laps):
         train, test = laps[~is_test].reset_index(drop=True), laps[is_test].reset_index(drop=True)
         out[int(year)] = {}
         for tier in config.TIERS:
-            pred = models.fit_gbt(train, config.TIERS[tier], tier).predict(test[config.TIERS[tier]])
-            out[int(year)][f"gbt_{tier}"] = {"mae_s": round(float(ml.mae(test["delta"], pred)), 4), "r2": round(float(ml.r2(test["delta"], pred)), 4)}
+            pred = models.fit_gb(train, config.TIERS[tier], tier).predict(test[config.TIERS[tier]])
+            out[int(year)][f"gb_{tier}"] = {"mae_s": round(float(ml.mae(test["delta"], pred)), 4), "r2": round(float(ml.r2(test["delta"], pred)), 4)}
         print("leave-one-year-out", year, flush=True)
     return out
+
+
+def later_stints(test, preds):
+    mask = (test["stint"] >= 2).to_numpy()
+    subset = test[mask].reset_index(drop=True)
+    names = ["median_baseline", "persistence_last3_laps", "gb_pre_lap", "gb_pre_stint", "gb_live"]
+    return {"share_of_test_laps": round(float(mask.mean()), 4), "scores": {name: metrics.score(subset, preds[name][mask]) for name in names}}
 
 
 def sanity_checks(train, test, preds, fitted):
     cols = config.TIERS["pre_lap"]
     shuffled = train.copy()
     shuffled["delta"] = np.random.RandomState(SEED).permutation(train["delta"].values)
-    shuffle_pred = models.fit_gbt(shuffled, cols, "pre_lap").predict(test[cols])
+    shuffle_pred = models.fit_gb(shuffled, cols, "pre_lap").predict(test[cols])
     out = {"label_shuffle": {"mae_s": round(float(ml.mae(test["delta"], shuffle_pred)), 4), "r2": round(float(ml.r2(test["delta"], shuffle_pred)), 4)}}
     out["train_vs_test"] = {}
     for tier in config.TIERS:
         train_pred = fitted[tier].predict(train[config.TIERS[tier]])
-        out["train_vs_test"][tier] = {"train_mae_s": round(float(ml.mae(train["delta"], train_pred)), 4), "test_mae_s": round(float(ml.mae(test["delta"], preds[f"gbt_{tier}"])), 4)}
-    out["ablation_pre_lap_test_mae_s"] = {"all_features": round(float(ml.mae(test["delta"], preds["gbt_pre_lap"])), 4)}
+        out["train_vs_test"][tier] = {"train_mae_s": round(float(ml.mae(train["delta"], train_pred)), 4), "test_mae_s": round(float(ml.mae(test["delta"], preds[f"gb_{tier}"])), 4)}
+    out["ablation_pre_lap_test_mae_s"] = {"all_features": round(float(ml.mae(test["delta"], preds["gb_pre_lap"])), 4)}
     for group, group_cols in config.FEATURE_GROUPS.items():
         kept = [c for c in cols if c not in group_cols]
-        pred = models.fit_gbt(train, kept, "pre_lap").predict(test[kept])
+        pred = models.fit_gb(train, kept, "pre_lap").predict(test[kept])
         out["ablation_pre_lap_test_mae_s"][f"drop_{group}"] = round(float(ml.mae(test["delta"], pred)), 4)
         print("ablation", group, flush=True)
     return out
@@ -110,16 +117,16 @@ def race_bootstrap(test, preds):
             draws[name].append(abs_err[name][rows].mean())
     ci = {name: [round(float(np.percentile(draws[name], 2.5)), 4), round(float(np.percentile(draws[name], 97.5)), 4)] for name in MODEL_ORDER}
     gain = {}
-    for name in ["gbt_pre_lap", "gbt_live"]:
+    for name in ["gb_pre_lap", "gb_pre_stint", "gb_live"]:
         diff = np.array(draws["formula_b_with_fuel_and_form"]) - np.array(draws[name])
         gain[name] = {"mean_s": round(float(diff.mean()), 4), "ci95": [round(float(np.percentile(diff, 2.5)), 4), round(float(np.percentile(diff, 97.5)), 4)], "share_better": round(float((diff > 0).mean()), 3)}
     return {"mae_ci95": ci, "gain_over_formula_b": gain}
 
 
 def plot_results(test, preds, fitted, fuel_total_s):
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    fig, axes = plt.subplots(1, len(config.TIERS), figsize=(5.4 * len(config.TIERS), 5))
     for ax, tier in zip(axes, config.TIERS):
-        ax.scatter(test["delta"], preds[f"gbt_{tier}"], s=2, alpha=0.15)
+        ax.scatter(test["delta"], preds[f"gb_{tier}"], s=2, alpha=0.15)
         ax.plot([-3, 6], [-3, 6], color="red", lw=1)
         ax.set(xlim=(-3, 6), ylim=(-3, 6), xlabel="Actual lap time minus field median (s)", ylabel="Predicted (s)", title=f"{tier} model, 2025 test laps")
     fig.tight_layout()
@@ -130,7 +137,7 @@ def plot_results(test, preds, fitted, fuel_total_s):
     frames = []
     for ax, compound in zip(axes, config.COMPOUNDS):
         mask = ((test["Compound"] == compound) & (test["TyreLife"] <= 30)).values
-        d = pd.DataFrame({"age": test.loc[mask, "TyreLife"].values, "actual": test.loc[mask, "delta"].values + fuel[mask].values, "pre_lap": preds["gbt_pre_lap"][mask] + fuel[mask].values, "live": preds["gbt_live"][mask] + fuel[mask].values})
+        d = pd.DataFrame({"age": test.loc[mask, "TyreLife"].values, "actual": test.loc[mask, "delta"].values + fuel[mask].values, "pre_lap": preds["gb_pre_lap"][mask] + fuel[mask].values, "live": preds["gb_live"][mask] + fuel[mask].values})
         g = d.groupby("age").mean()
         g = g - g.loc[2:4].mean()
         frames.append(g.reset_index().assign(compound=compound.title()))
@@ -146,7 +153,7 @@ def plot_results(test, preds, fitted, fuel_total_s):
     plt.close(fig)
     importance = pd.Series(fitted["live"].feature_importances_, index=config.TIERS["live"]).sort_values()
     fig, ax = plt.subplots(figsize=(7, 8))
-    importance.plot.barh(ax=ax, title="Gradient-boosted trees feature importance (live model)")
+    importance.plot.barh(ax=ax, title="Gradient boosting feature importance (live model)")
     fig.tight_layout()
     fig.savefig(f"{RESULTS_DIR}/feature_importance.png", dpi=150)
     plt.close(fig)
@@ -162,9 +169,13 @@ def write_summary(report):
         m = report["mixed_year_cv"][name]
         years = " / ".join(str(v) for v in m["per_year_mae"].values())
         lines.append(f"| {name} | {m['mae_s']} | {m['r2']} | {m['fold_mae_std']} | {years} |")
-    lines += ["", "## Leave-one-year-out MAE (R2)", "", "| Held-out year | pre-lap | live |", "|---|---|---|"]
+    lines += ["", "## Leave-one-year-out MAE (R2)", "", "| Held-out year | pre-lap | pre-stint | live |", "|---|---|---|---|"]
     for year, m in report["leave_one_year_out"].items():
-        lines.append(f"| {year} | {m['gbt_pre_lap']['mae_s']} ({m['gbt_pre_lap']['r2']}) | {m['gbt_live']['mae_s']} ({m['gbt_live']['r2']}) |")
+        lines.append(f"| {year} | {m['gb_pre_lap']['mae_s']} ({m['gb_pre_lap']['r2']}) | {m['gb_pre_stint']['mae_s']} ({m['gb_pre_stint']['r2']}) | {m['gb_live']['mae_s']} ({m['gb_live']['r2']}) |")
+    later = report["holdout_2025_stint_2_plus"]
+    lines += ["", f"## 2025 holdout, laps in stint 2 or later ({100 * later['share_of_test_laps']:.0f}% of laps)", "", "| Model | MAE (s) | Median AE (s) | R2 |", "|---|---|---|---|"]
+    for name, m in later["scores"].items():
+        lines.append(f"| {name} | {m['mae_s']} | {m['median_ae_s']} | {m['r2']} |")
     open(f"{RESULTS_DIR}/summary.md", "w").write("\n".join(lines) + "\n")
 
 
@@ -176,6 +187,7 @@ def main():
     scores, preds, fitted, fuel_total_s = holdout(train, test)
     report = {"fuel_effect_total_s_fitted": round(fuel_total_s, 3), "holdout_2025": scores}
     print(json.dumps(scores, indent=1), flush=True)
+    report["holdout_2025_stint_2_plus"] = later_stints(test, preds)
     report["mixed_year_cv"] = mixed_year_cv(laps)
     report["leave_one_year_out"] = leave_one_year_out(laps)
     report["sanity_checks"] = sanity_checks(train, test, preds, fitted)
