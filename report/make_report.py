@@ -39,7 +39,7 @@ def details_html():
 
 
 def image_tag(name, width=100):
-    with open(os.path.join(ROOT, "results", name), "rb") as f:
+    with open(os.path.join(ROOT, "report" if name.startswith("app_") else "results", name), "rb") as f:
         data = base64.b64encode(f.read()).decode()
     return f'<img style="width:{width}%" src="data:image/png;base64,{data}">'
 
@@ -140,7 +140,12 @@ def build_html(report, deg):
 <li><b>In the lap-level model it helps tyre behaviour, not lap time.</b> Adding elevation change raises the stint slope correlation of the pre-lap gradient boosting model from {d['gb_without']['slope_corr']:.2f} to {d['gb_with']['slope_corr']:.2f}, but its lap-time error is not better (MAE {ablation['drop_circuit']:.3f} s without, {ablation['all_features']:.3f} s with).</li>
 </ul>
 
-<h2>6. Validation checks</h2>
+<h2 style="break-before:page">6. The app</h2>
+<p>A Streamlit app with four tabs makes the models explorable. <b>Predictor</b> draws the degradation curves for the three compounds at any circuit and track temperature, with 95% bands and a second view that adds fuel burn, so lap times can fall while the tyre wears. <b>Race explorer</b> plots the real stints of any driver in any race from 2022 to 2025 against what the model expects. <b>Circuits</b> ranks the 25 circuits by predicted tyre loss. <b>Model</b> shows the scores from this report.</p>
+<div class="fig">{image_tag("app_predictor.png", 62)}<div class="cap">Figure 6. Predictor tab: curves and 95% bands for the three compounds at Bahrain, with the circuit profile measured from telemetry.</div></div>
+<div class="fig">{image_tag("app_explorer.png", 62)}<div class="cap">Figure 7. Race explorer tab: one driver's real stints (dots) against the degradation model (line). Single stints are noisy and the model describes the typical case.</div></div>
+<div class="fig">{image_tag("app_circuits.png", 62)}<div class="cap">Figure 8. Circuits tab: predicted lap-time loss after 20 laps on soft tyres at 35 C.</div></div>
+<h2>7. Validation checks</h2>
 <ul>
 <li><b>No leakage.</b> A model trained on shuffled targets scores R&sup2; {checks['label_shuffle']['r2']:.2f} and MAE {checks['label_shuffle']['mae_s']:.2f}, the same as the baseline.</li>
 <li><b>Not a lucky season.</b> Leave-one-year-out gives similar errors for every year (below), so regulation changes do not break the model.</li>
@@ -154,7 +159,7 @@ def build_html(report, deg):
 {table(["Features", "MAE (s)"], ablation_rows, ("all_features",))}
 <div class="cap">Removing the tyre features costs about 0.06 s, as much as removing fuel progress or traffic: tyre age is one contributor among several.</div>
 
-<h2>7. Limitations</h2>
+<h2>8. Limitations</h2>
 <ul>
 <li>A single lap carries about 0.33 s of random noise from traffic and mistakes, so lap-level R&sup2; has a ceiling near 0.9 for any model; most pre-lap error is each driver's race-specific offset, which no pre-lap information reveals.</li>
 <li>Circuit characteristics are measured once per circuit from one fast lap (the latest season available), so layout changes between seasons are ignored, and with only 25 circuits their effects cannot be separated reliably.</li>
@@ -164,7 +169,7 @@ def build_html(report, deg):
 <li>Some design choices (the lap filter and feature set) were made while looking at 2025 results, so the 2025 holdout is slightly optimistic; cross-validation is the better estimate.</li>
 </ul>
 
-<h2>8. Conclusion</h2>
+<h2>9. Conclusion</h2>
 <p>A from-scratch gradient boosting model predicts lap time relative to the field with MAE {hold['gb_pre_lap']['mae_s']:.3f} s (R&sup2; {hold['gb_pre_lap']['r2']:.2f}) using only information available before the lap, against {hold['median_baseline']['mae_s']:.3f} s for a naive baseline and {hold['formula_b_with_fuel_and_form']['mae_s']:.3f} s for a fitted formula, and reproduces real tyre-age curves on unseen races. Knowing how the driver went in earlier stints cuts the error to {hold['gb_pre_stint']['mae_s']:.3f} s (R&sup2; {hold['gb_pre_stint']['r2']:.2f}). With the driver's recent laps, error drops to {hold['gb_live']['mae_s']:.3f} s, {persist_gain:.0f}% better than simple persistence.</p>
 </body></html>"""
 

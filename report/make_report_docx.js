@@ -114,7 +114,7 @@ function pngSize(buffer) {
 }
 
 function figure(file, captionText, scale = 1) {
-  const buffer = fs.readFileSync(path.join(ROOT, "results", file));
+  const buffer = fs.readFileSync(path.join(ROOT, file.startsWith("app_") ? "report" : "results", file));
   const { width, height } = pngSize(buffer);
   const targetWidth = Math.round((CONTENT / 1440) * 96 * scale);
   return [
@@ -195,7 +195,12 @@ const children = [
 
   bullet([["In the lap-level model it helps tyre behaviour, not lap time. "], `Adding elevation change raises the stint slope correlation of the pre-lap gradient boosting model from ${f2(dv["gradient boosting, pre-lap without circuit feature"].slope_corr)} to ${f2(dv["gradient boosting, pre-lap (lap-level model)"].slope_corr)}, but its lap-time error is not better (MAE ${f3(ablation.drop_circuit)} s without, ${f3(ablation.all_features)} s with).`]),
 
-  heading("6. Validation checks"),
+  heading("6. The app"),
+  para(["A Streamlit app with four tabs makes the models explorable. ", ["Predictor"], " draws the degradation curves for the three compounds at any circuit and track temperature, with 95% bands and a second view that adds fuel burn, so lap times can fall while the tyre wears. ", ["Race explorer"], " plots the real stints of any driver in any race from 2022 to 2025 against what the model expects. ", ["Circuits"], " ranks the 25 circuits by predicted tyre loss. ", ["Model"], " shows the scores from this report."]),
+  ...figure("app_predictor.png", "Figure 6. Predictor tab: curves and 95% bands for the three compounds at Bahrain, with the circuit profile measured from telemetry.", 0.62),
+  ...figure("app_explorer.png", "Figure 7. Race explorer tab: one driver's real stints (dots) against the degradation model (line). Single stints are noisy and the model describes the typical case.", 0.62),
+  ...figure("app_circuits.png", "Figure 8. Circuits tab: predicted lap-time loss after 20 laps on soft tyres at 35 C.", 0.62),
+  heading("7. Validation checks"),
   bullet([["No leakage. "], `A model trained on shuffled targets scores R² ${f2(checks.label_shuffle.r2)} and MAE ${f2(checks.label_shuffle.mae_s)}, the same as the baseline.`]),
   bullet([["Not a lucky season. "], "Leave-one-year-out gives similar errors for every year (below), so regulation changes do not break the model."]),
   bullet([["Overfitting. "], `Pre-lap train MAE ${f3(gap.pre_lap.train_mae_s)} against test ${f3(gap.pre_lap.test_mae_s)}; live ${f3(gap.live.train_mae_s)} against ${f3(gap.live.test_mae_s)}.`]),
@@ -208,7 +213,7 @@ const children = [
   table(["Features", "MAE (s)"], ablationRows, [7000, 2866], new Set(["all_features"])),
   caption("Removing the tyre features costs about 0.06 s, as much as removing fuel progress or traffic: tyre age is one contributor among several."),
 
-  heading("7. Limitations"),
+  heading("8. Limitations"),
   bullet(["A single lap carries about 0.33 s of random noise from traffic and mistakes, so lap-level R² has a ceiling near 0.9 for any model; most pre-lap error is each driver's race-specific offset, which no pre-lap information reveals."]),
   bullet(["Circuit characteristics are measured once per circuit from one fast lap (the latest season available), so layout changes between seasons are ignored, and with only 25 circuits their effects cannot be separated reliably."]),
   bullet(["The target is relative to the race's field-median lap, which comes from the session itself, not from a separate forecast."]),
@@ -216,7 +221,7 @@ const children = [
   bullet([`The live model is mostly persistence: the plain last-3-lap average already reaches R² ${f2(hold.persistence_last3_laps.r2)}.`]),
   bullet(["Some design choices (the lap filter and feature set) were made while looking at 2025 results, so the 2025 holdout is slightly optimistic; cross-validation is the better estimate."]),
 
-  heading("8. Conclusion"),
+  heading("9. Conclusion"),
   para([`A from-scratch gradient boosting model predicts lap time relative to the field with MAE ${f3(hold.gb_pre_lap.mae_s)} s (R² ${f2(hold.gb_pre_lap.r2)}) using only information available before the lap, against ${f3(hold.median_baseline.mae_s)} s for a naive baseline and ${f3(hold.formula_b_with_fuel_and_form.mae_s)} s for a fitted formula, and reproduces real tyre-age curves on unseen races. Knowing how the driver went in earlier stints cuts the error to ${f3(hold.gb_pre_stint.mae_s)} s (R² ${f2(hold.gb_pre_stint.r2)}). With the driver's recent laps, error drops to ${f3(hold.gb_live.mae_s)} s, ${persistGain}% better than simple persistence.`]),
 ];
 
