@@ -2,8 +2,9 @@
 
 Every long stint is fitted with a straight line and with a straight line plus one hinge (the slope
 changes at a knee age). A cliff is a hinge that improves the fit clearly (BIC) and adds a large extra
-slope. Slowing down by the same amount is just as likely to appear by chance as speeding up, so the
-share of stints that "slow down" late is reported next to the cliff share as the noise reference.
+slope, with the knee in the second half of the stint (an early knee is a warm-up shape, not a cliff).
+Slowing down by the same amount is just as likely to appear by chance as speeding up, so the share of
+stints that "slow down" late is reported next to the cliff share as the noise reference.
 """
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ MIN_LAPS_BEFORE = 8
 MIN_LAPS_AFTER = 4
 MIN_BIC_GAIN = 10.0
 MIN_EXTRA_SLOPE = 0.10
+MIN_KNEE_POSITION = 0.5
 
 
 def best_break(age, y, min_before=MIN_LAPS_BEFORE, min_after=MIN_LAPS_AFTER):
@@ -47,9 +49,10 @@ def find_cliffs(panel, min_laps=MIN_CLIFF_LAPS):
         found = best_break(stint["age"].to_numpy(), stint["y"].to_numpy())
         if found is None:
             continue
-        rows.append({"race_id": key[0], "Driver": key[1], "Stint": key[2], "Compound": stint["Compound"].iloc[0], "Year": stint["Year"].iloc[0], "laps": len(stint), **found})
-    table = pd.DataFrame(rows, columns=["race_id", "Driver", "Stint", "Compound", "Year", "laps", "knee", "extra_slope", "bic_gain"])
-    clear = table["bic_gain"] > MIN_BIC_GAIN
+        first, last = stint["age"].min(), stint["age"].max()
+        rows.append({"race_id": key[0], "Driver": key[1], "Stint": key[2], "Compound": stint["Compound"].iloc[0], "Year": stint["Year"].iloc[0], "laps": len(stint), **found, "knee_position": (found["knee"] - first) / (last - first)})
+    table = pd.DataFrame(rows, columns=["race_id", "Driver", "Stint", "Compound", "Year", "laps", "knee", "extra_slope", "bic_gain", "knee_position"])
+    clear = (table["bic_gain"] > MIN_BIC_GAIN) & (table["knee_position"] >= MIN_KNEE_POSITION)
     table["cliff"] = clear & (table["extra_slope"] >= MIN_EXTRA_SLOPE)
     table["relief"] = clear & (table["extra_slope"] <= -MIN_EXTRA_SLOPE)
     return table

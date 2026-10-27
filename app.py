@@ -177,14 +177,23 @@ def stint_spread(table):
     return {c: (float(gap[table["Compound"] == c.title()].quantile(0.1)), float(gap[table["Compound"] == c.title()].quantile(0.9))) for c in config.COMPOUNDS}
 
 
-def stint_chart(frame):
+def stint_chart(frame, title):
     colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
     x = alt.X("age:Q", title="Tyre age (laps)")
-    dots = alt.Chart(frame).mark_circle(size=70, opacity=0.9).encode(x=x, y=alt.Y("actual:Q", title="Lap time vs stint average, fuel-corrected (s)"), color=alt.Color("Compound:N", scale=colors, legend=None), tooltip=["age", "actual", "predicted"])
+    dots = alt.Chart(frame).mark_circle(size=70, opacity=0.9).encode(x=x, y=alt.Y("actual:Q", title="Lap time vs stint average (s)"), color=alt.Color("Compound:N", scale=colors, legend=None), tooltip=["age", "actual", "predicted"])
     line = alt.Chart(frame).mark_line(color="#F2F2F2", strokeWidth=2).encode(x=x, y="predicted:Q")
     trend = alt.Chart(frame).mark_line(color="#8E8E93", strokeWidth=1.5, strokeDash=[5, 4]).encode(x=x, y="trend:Q")
     rule = alt.Chart(frame).mark_rule(color="#E10600", strokeDash=[2, 3], strokeWidth=2).transform_filter("isValid(datum.knee)").encode(x="knee:Q")
-    return alt.layer(dots, trend, line, rule).properties(height=260).facet(column=alt.Column("stint_label:N", title=None, header=alt.Header(labelColor="#BDBDC2", labelFontSize=12))).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
+    return alt.layer(dots, trend, line, rule).properties(height=260, title=alt.TitleParams(title, color="#BDBDC2", fontSize=13, fontWeight="normal")).configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E")
+
+
+def stint_grid(stints):
+    labels = list(dict.fromkeys(stints["stint_label"]))
+    for start in range(0, len(labels), 3):
+        row = labels[start : start + 3]
+        for column, name in zip(st.columns(3), row):
+            with column:
+                st.altair_chart(stint_chart(stints[stints["stint_label"] == name], name), use_container_width=True, theme=None)
 
 
 def explorer_tab(model, circuits, panel):
@@ -209,7 +218,7 @@ def explorer_tab(model, circuits, panel):
     stints = stints.merge(found.assign(knee=found["knee"].where(found["cliff"]))[["Stint", "knee"]], on="Stint", how="left")
     stints["stint_label"] = stints.apply(lambda r: f"Stint {int(r['Stint'])}: {r['Compound']}", axis=1)
     st.write("")
-    st.altair_chart(stint_chart(stints), use_container_width=True, theme=None)
+    stint_grid(stints)
     slopes = degradation.stint_slopes(stints["y"], stints)
     fitted = degradation.stint_slopes(stints["predicted"], stints)
     html = "<table><tr><th>Stint</th><th>Compound</th><th>Clean laps</th><th>Actual (s per lap)</th><th>Model (s per lap)</th><th>Cliff</th></tr>"
@@ -282,7 +291,7 @@ def cliff_section(deg):
     colors = alt.Scale(domain=list(COMPOUND_COLORS), range=list(COMPOUND_COLORS.values()))
     bars = alt.Chart(cliffs).mark_bar().encode(x=alt.X("knee:Q", bin=alt.Bin(step=4, extent=[8, 48]), title="Tyre age at which the loss speeds up (laps)"), y=alt.Y("count():Q", title="Stints"), color=alt.Color("Compound:N", scale=colors, legend=alt.Legend(orient="top", title=None))).properties(height=240)
     st.altair_chart(bars.configure(background="transparent").configure_view(strokeWidth=0).configure_axis(gridColor="#1C1C1F", labelColor="#8E8E93", titleColor="#8E8E93", domainColor="#2A2A2E", tickColor="#2A2A2E").configure_legend(labelColor="#F2F2F2"), use_container_width=True, theme=None)
-    st.markdown(f'<div class="f1-note">Each long stint is fitted with a straight line and with a straight line that steepens at one age. A cliff is a clear improvement from steepening (BIC gain over {cliff.MIN_BIC_GAIN:.0f}) with at least {cliff.MIN_EXTRA_SLOPE:.1f} s per lap of extra loss. {100 * summary["ALL"]["cliff_share"]:.0f}% of long stints show one, against {100 * summary["ALL"]["relief_share_noise_reference"]:.0f}% that slow down by the same amount, which is what chance alone would give: so about {100 * (summary["ALL"]["cliff_share"] - summary["ALL"]["relief_share_noise_reference"]):.0f}% of long stints have a real cliff, typically {summary["ALL"]["median_extra_slope_s_per_lap"]:.2f} s per lap steeper afterwards. Most stints never reach a cliff because teams pit first, and onset ages vary, so an average curve cannot show it. The soft sample is small ({summary["SOFT"]["cliff_stints"]} cliffs).</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="f1-note">Each long stint is fitted with a straight line and with a straight line that steepens at one age. A cliff is a clear improvement from steepening (BIC gain over {cliff.MIN_BIC_GAIN:.0f}) in the second half of the stint, with at least {cliff.MIN_EXTRA_SLOPE:.1f} s per lap of extra loss. {100 * summary["ALL"]["cliff_share"]:.0f}% of long stints show one, against {100 * summary["ALL"]["relief_share_noise_reference"]:.0f}% that slow down by the same amount, which is what chance alone would give: so about {100 * (summary["ALL"]["cliff_share"] - summary["ALL"]["relief_share_noise_reference"]):.0f}% of long stints have a real cliff, typically {summary["ALL"]["median_extra_slope_s_per_lap"]:.2f} s per lap steeper afterwards. Most stints never reach a cliff because teams pit first, and onset ages vary, so an average curve cannot show it. The soft sample is small ({summary["SOFT"]["cliff_stints"]} cliffs).</div>', unsafe_allow_html=True)
     st.write("")
 
 

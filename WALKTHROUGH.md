@@ -352,9 +352,9 @@ Looking at single stints in the Race explorer, the white model line often looks 
 
 **Why the average curve cannot show it.** (1) Teams usually pit before a cliff arrives. (2) The age at which it starts differs between stints. (3) An average over all stints at each age mixes stints that have and have not reached it. So we look at stints one by one.
 
-**Method.** For every stint with at least 20 clean laps we fit two models to the fuel-corrected lap times: a straight line, and a straight line plus a hinge `max(age - knee, 0)`, which lets the slope increase after the knee age. We try every possible knee (at least 8 laps before it and 4 after) and keep the best. We call it a cliff when (a) the hinge model fits clearly better by BIC (a gain over 10, so the extra parameter is worth it) and (b) the extra slope is at least 0.1 s per lap. BIC (Bayesian information criterion) is a fit score that charges a penalty for each extra parameter, so a gain of 10 means the hinge is clearly not just fitting noise.
+**Method.** For every stint with at least 20 clean laps we fit two models to the fuel-corrected lap times: a straight line, and a straight line plus a hinge `max(age - knee, 0)`, which lets the slope increase after the knee age. We try every possible knee (at least 8 laps before it and 4 after) and keep the best. We call it a cliff when (a) the hinge model fits clearly better by BIC (a gain over 10, so the extra parameter is worth it) (b) the extra slope is at least 0.1 s per lap and (c) the knee lies in the second half of the stint (an early knee is a warm-up shape, where the tyre switches on and then wears, not a cliff). BIC (Bayesian information criterion) is a fit score that charges a penalty for each extra parameter, so a gain of 10 means the hinge is clearly not just fitting noise.
 
-**The noise reference.** Random noise (traffic, a mistake) can make a stint look like it speeds up late. The same noise can make a stint look like it slows down late by the same amount, and a tyre cliff cannot produce that. So the share of stints that slow down late, which we call relief, estimates how many false cliffs to expect. Result: 11% of long stints speed up late and 4% slow down late, so about 7% have a real cliff, typically 0.22 s per lap steeper afterwards, with a median onset age of 18 laps (soft 17, medium 14.5, hard 21). The soft sample is small (18 cliffs).
+**The noise reference.** Random noise (traffic, a mistake) can make a stint look like it speeds up late. The same noise can make a stint look like it slows down late by the same amount, and a tyre cliff cannot produce that. So the share of stints that slow down late, which we call relief, estimates how many false cliffs to expect. Result: 5.9% of long stints speed up late and 1.5% slow down late, so about 4% have a real cliff, typically 0.25 s per lap steeper afterwards, with a median onset age of 24 laps (soft 18.5, medium 21, hard 27, ordered as you would expect). The soft sample is small (10 cliffs). Our first version accepted a knee anywhere and found 11%, but many of those early knees were warm-up shapes, so we restricted cliffs to the second half of the stint.
 
 **Caveats to state.** The reference controls for symmetric noise only. A slow traffic phase at the end of a stint could still look like a cliff, and tyre-saving or a car problem can mimic one. We cannot see tyre temperature, so we call it a late speed-up in lap-time loss, which is what a cliff does to lap times.
 
@@ -606,10 +606,10 @@ A: No. It is a tested, reported finding: severity depends on tyre allocation, we
 ### Cliff and circuit questions
 
 **Q: Did you find the tyre cliff?**
-A: Yes, at stint level. About 7% of stints of 20 or more laps have a real late speed-up of roughly 0.22 s per lap, starting at a median age of 18 laps. An average curve cannot show it because teams pit before it and onset ages differ.
+A: Yes, at stint level. About 4% of stints of 20 or more laps have a real late speed-up of roughly 0.25 s per lap, starting at a median age of 24 laps. An average curve cannot show it because teams pit before it and onset ages differ.
 
 **Q: How do you know those are cliffs and not noise?**
-A: Stints that slow down late by the same amount appear in 4% of stints, against 11% that speed up, and symmetric noise would produce both equally. The excess is the cliff.
+A: Stints that slow down late by the same amount appear in 1.5% of stints, against 5.9% that speed up, and symmetric noise would produce both equally. The excess is the cliff.
 
 **Q: How is elevation change related to tyre degradation?**
 A: Empirically, circuits with more elevation change had higher measured degradation (rank correlation 0.59, p = 0.02 after allowing for choosing the best of 13). We do not claim a proven mechanism; it may stand in for layout and surface traits of hilly circuits.

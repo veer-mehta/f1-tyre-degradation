@@ -42,15 +42,15 @@ Degradation on unseen 2025 stints (seconds lost per lap of tyre age):
 
 Soft wears about 1.7 times faster than hard, in every season. The curve is a parabola because it reproduced the observed tyre-age curve best on held-out stints (error 0.136 s against 0.145 to 0.147 s for flexible shapes). It is the average lap: over all 3,353 stints it sits 13% below the average stint slope, because long stints dominate the fit and are the gentle ones, and single stints differ a lot. The app plots every stint against the model.
 
-**Tyre cliff.** Each stint of 20 or more laps is fitted with a straight line and with a line that steepens at one age. A stint that speeds up late by at least 0.1 s per lap is a cliff. Stints that slow down by the same amount are the noise reference.
+**Tyre cliff.** Each stint of 20 or more laps is fitted with a straight line and with a line that steepens at one age. A stint that speeds up by at least 0.1 s per lap, at an age in the second half of the stint, is a cliff. Stints that slow down by the same amount are the noise reference.
 
 | Compound | Stints | Cliff | Noise reference | Median onset (lap) | Extra loss after onset (s per lap) |
 |---|---|---|---|---|---|
-| Soft | 102 | 18% | 2% | 17 | 0.21 |
-| Medium | 509 | 12% | 3% | 14.5 | 0.23 |
-| Hard | 960 | 10% | 4% | 21 | 0.22 |
+| Soft | 102 | 10% | 1% | 18.5 | 0.25 |
+| Medium | 509 | 4% | 1% | 21 | 0.25 |
+| Hard | 960 | 7% | 2% | 27 | 0.25 |
 
-About 7% of long stints have a real cliff. Most stints are pitted before one, and onset ages vary, so an average curve cannot show it. The Race explorer marks detected cliffs.
+About 4% of long stints have a real cliff (6% against a 1.5% noise reference), typically 0.25 s per lap steeper afterwards, starting at a median age of 24 laps. Most stints are pitted before one, and onset ages vary, so an average curve cannot show it. The Race explorer marks detected cliffs.
 
 **Circuit characteristic.** Elevation change per km correlates 0.59 with measured circuit severity (p = 0.02 after allowing for picking the best of 13 characteristics, and 0.55 to 0.66 when any one circuit is dropped). No physical mechanism is proven.
 

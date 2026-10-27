@@ -37,6 +37,11 @@ class CliffTests(unittest.TestCase):
         self.assertEqual(table["cliff"].tolist(), [True, False])
         self.assertEqual(table["relief"].tolist(), [False, True])
 
+    def test_an_early_knee_is_a_warm_up_shape_not_a_cliff(self):
+        table = cliff.find_cliffs(as_panel([stint(0.0, knee=9, extra=0.15)]))
+        self.assertLess(table["knee_position"].iloc[0], cliff.MIN_KNEE_POSITION)
+        self.assertFalse(table["cliff"].iloc[0])
+
     def test_short_stints_are_skipped_and_summary_counts_match(self):
         panel = as_panel([stint(0.03, knee=22, extra=0.25), stint(0.04, laps=12, seed=2)])
         table = cliff.find_cliffs(panel)

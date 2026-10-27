@@ -291,35 +291,35 @@
     "summary": {
       "ALL": {
         "stints": 1571,
-        "cliff_share": 0.1082,
-        "relief_share_noise_reference": 0.0376,
-        "cliff_stints": 170,
-        "median_onset_age": 18.0,
-        "median_extra_slope_s_per_lap": 0.225
+        "cliff_share": 0.0586,
+        "relief_share_noise_reference": 0.0153,
+        "cliff_stints": 92,
+        "median_onset_age": 24.0,
+        "median_extra_slope_s_per_lap": 0.251
       },
       "SOFT": {
         "stints": 102,
-        "cliff_share": 0.1765,
-        "relief_share_noise_reference": 0.0196,
-        "cliff_stints": 18,
-        "median_onset_age": 17.0,
-        "median_extra_slope_s_per_lap": 0.208
+        "cliff_share": 0.098,
+        "relief_share_noise_reference": 0.0098,
+        "cliff_stints": 10,
+        "median_onset_age": 18.5,
+        "median_extra_slope_s_per_lap": 0.248
       },
       "MEDIUM": {
         "stints": 509,
-        "cliff_share": 0.1179,
-        "relief_share_noise_reference": 0.0314,
-        "cliff_stints": 60,
-        "median_onset_age": 14.5,
-        "median_extra_slope_s_per_lap": 0.226
+        "cliff_share": 0.0373,
+        "relief_share_noise_reference": 0.0138,
+        "cliff_stints": 19,
+        "median_onset_age": 21.0,
+        "median_extra_slope_s_per_lap": 0.25
       },
       "HARD": {
         "stints": 960,
-        "cliff_share": 0.0958,
-        "relief_share_noise_reference": 0.0427,
-        "cliff_stints": 92,
-        "median_onset_age": 21.0,
-        "median_extra_slope_s_per_lap": 0.224
+        "cliff_share": 0.0656,
+        "relief_share_noise_reference": 0.0167,
+        "cliff_stints": 63,
+        "median_onset_age": 27.0,
+        "median_extra_slope_s_per_lap": 0.253
       }
     }
   },
