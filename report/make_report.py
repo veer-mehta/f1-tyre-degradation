@@ -157,7 +157,7 @@ def build_html(report, deg):
 {table(["Held-out year", "Pre-lap", "Pre-stint", "Live"], loyo_rows)}
 <p>Feature-group ablation, pre-lap model, 2025 MAE in seconds:</p>
 {table(["Features", "MAE (s)"], ablation_rows, ("all_features",))}
-<div class="cap">Removing the tyre features costs about 0.06 s, as much as removing fuel progress or traffic: tyre age is one contributor among several.</div>
+<div class="cap">Removing the tyre features costs about 0.04 s, about as much as removing fuel progress or traffic (0.05 s): tyre age is one contributor among several.</div>
 
 <h2>8. Limitations</h2>
 <ul>

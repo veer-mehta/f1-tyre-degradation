@@ -85,7 +85,7 @@ img { width: 100%; margin: 8px 0 2px 0; }
 <table><tr><th class="">Held-out year</th><th class="n">Pre-lap</th><th class="n">Pre-stint</th><th class="n">Live</th></tr><tr><td class="">2022</td><td class="n">0.537 (0.62)</td><td class="n">0.499 (0.67)</td><td class="n">0.336 (0.81)</td></tr><tr><td class="">2023</td><td class="n">0.471 (0.64)</td><td class="n">0.442 (0.67)</td><td class="n">0.301 (0.81)</td></tr><tr><td class="">2024</td><td class="n">0.477 (0.67)</td><td class="n">0.458 (0.69)</td><td class="n">0.313 (0.82)</td></tr><tr><td class="">2025</td><td class="n">0.468 (0.66)</td><td class="n">0.437 (0.70)</td><td class="n">0.294 (0.82)</td></tr></table>
 <p>Feature-group ablation, pre-lap model, 2025 MAE in seconds:</p>
 <table><tr><th class="">Features</th><th class="n">MAE (s)</th></tr><tr class="key"><td class="">All features</td><td class="n">0.468</td></tr><tr><td class="">Without tyre</td><td class="n">0.512</td></tr><tr><td class="">Without fuel progress</td><td class="n">0.510</td></tr><tr><td class="">Without weather</td><td class="n">0.469</td></tr><tr><td class="">Without form</td><td class="n">0.472</td></tr><tr><td class="">Without traffic</td><td class="n">0.517</td></tr><tr><td class="">Without field context</td><td class="n">0.476</td></tr><tr><td class="">Without circuit</td><td class="n">0.465</td></tr></table>
-<div class="cap">Removing the tyre features costs about 0.06 s, as much as removing fuel progress or traffic: tyre age is one contributor among several.</div>
+<div class="cap">Removing the tyre features costs about 0.04 s, about as much as removing fuel progress or traffic (0.05 s): tyre age is one contributor among several.</div>
 
 <h2>8. Limitations</h2>
 <ul>

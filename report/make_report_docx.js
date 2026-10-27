@@ -211,7 +211,7 @@ const children = [
   new Paragraph({ spacing: { after: 100 }, children: [] }),
   para(["Feature-group ablation, pre-lap model, 2025 MAE in seconds:"], { keepNext: true }),
   table(["Features", "MAE (s)"], ablationRows, [7000, 2866], new Set(["all_features"])),
-  caption("Removing the tyre features costs about 0.06 s, as much as removing fuel progress or traffic: tyre age is one contributor among several."),
+  caption("Removing the tyre features costs about 0.04 s, about as much as removing fuel progress or traffic (0.05 s): tyre age is one contributor among several."),
 
   heading("8. Limitations"),
   bullet(["A single lap carries about 0.33 s of random noise from traffic and mistakes, so lap-level R² has a ceiling near 0.9 for any model; most pre-lap error is each driver's race-specific offset, which no pre-lap information reveals."]),
