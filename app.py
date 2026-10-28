@@ -158,8 +158,8 @@ def lap_time_tab(served, defaults, circuits, example_data):
     st.markdown('<div class="f1-note">The gradient boosting models, written from scratch, predict a lap relative to the race median lap, so a race median is needed to give seconds: it is taken from the circuit (latest season) or from your own laps, and you can change it. The pre-lap model ignores lap times; the live model also uses the lap times you entered before each lap, so it needs an earlier lap and shows a dash for the first one. Inputs you leave out (weather, traffic, driver pace, how the field is trending) take neutral defaults, which makes predictions worse: these race conditions matter, and the example shows the models with the real values filled in. The circuit effect is its elevation change. Both models were trained on all races from 2022 to 2025, so the example stint is part of their training data and fits better than new laps would; the honest error on unseen races is on the Model tab.</div>', unsafe_allow_html=True)
 
 
-def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread):
-    c1, c2, c3, c4 = st.columns([2, 1.3, 1.5, 1.7])
+def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s):
+    c1, c2, c3 = st.columns([2, 1.3, 1.5])
     with c1:
         label("Circuit")
         events = sorted(circuits.index)
@@ -170,9 +170,6 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread
     with c3:
         label("View")
         view = st.radio("View", ["Tyre effect", "Lap time with fuel burn"], horizontal=True, label_visibility="collapsed")
-    with c4:
-        label("Shaded band")
-        band_mode = st.radio("Shaded band", ["Average (95%)", "Single stints (80%)"], horizontal=True, label_visibility="collapsed")
     ages = np.arange(1, MAX_AGE + 1)
     frames = []
     for c in config.COMPOUNDS:
@@ -180,11 +177,6 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread
         frame["low"], frame["high"] = model.curve_band(c, circuits.loc[event], track_temp, ages, draws)
         frames.append(frame)
     curves = pd.concat(frames, ignore_index=True)
-    if band_mode.startswith("Single"):
-        low_slope = curves["compound"].str.upper().map({c: spread[c][0] for c in spread})
-        high_slope = curves["compound"].str.upper().map({c: spread[c][1] for c in spread})
-        curves["low"] = curves["loss"] + low_slope * (curves["age"] - 1)
-        curves["high"] = curves["loss"] + high_slope * (curves["age"] - 1)
     fuel_view = view.startswith("Lap time")
     if fuel_view:
         burn = fuel_total_s / totals[event] * (curves["age"] - 1)
@@ -198,7 +190,7 @@ def predictor_tab(model, circuits, selected, draws, totals, fuel_total_s, spread
     label("Circuit profile (from fastest-lap telemetry)")
     st.markdown(circuit_profile(circuits.loc[event], selected), unsafe_allow_html=True)
     used = ", ".join(DESCRIPTOR_LABELS[c].lower() for c in selected) or "none"
-    st.markdown(f'<div class="f1-note">Each stint is compared only with itself, so driver, car and strategy cancel out; the model is fitted on 2022-2025 races, and the shaded band is either the 95% interval of the average curve (from resampling races) or the range holding the middle 80% of real stints, which is much wider because stints differ a lot. Besides compound and tyre age it uses track temperature and the circuit characteristics that held up in testing: {used} (marked in red). The other circuit characteristics showed no reliable link to degradation. Treat the curves as typical behaviour, not a strategy call. "Lap time with fuel burn" adds the time gained as the car gets lighter (about {fuel_total_s / totals[event]:.2f} s per lap here), so lap times can fall even while the tyre degrades.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="f1-note">Each stint is compared only with itself, so driver, car and strategy cancel out; the model is fitted on 2022-2025 races, and the shaded band is the 95% interval of the average curve, from resampling whole races. Besides compound and tyre age it uses track temperature and the circuit characteristics that held up in testing: {used} (marked in red). The other circuit characteristics showed no reliable link to degradation. Treat the curves as typical behaviour, not a strategy call. "Lap time with fuel burn" adds the time gained as the car gets lighter (about {fuel_total_s / totals[event]:.2f} s per lap here), so lap times can fall even while the tyre degrades.</div>', unsafe_allow_html=True)
 
 
 def lap_model_table(report):
@@ -346,7 +338,7 @@ def main():
     with tab_predict:
         curves_tab, laps_tab = st.tabs(["Tyre curves", "Lap times"])
         with curves_tab:
-            predictor_tab(a["degradation"], a["circuits"], a["selected"], a["draws"], a["totals"], a["fuel_total_s"], a["spread"])
+            predictor_tab(a["degradation"], a["circuits"], a["selected"], a["draws"], a["totals"], a["fuel_total_s"])
         with laps_tab:
             lap_time_tab(a["served"], a["defaults"], a["circuits"], a["example"])
     with tab_explore:
