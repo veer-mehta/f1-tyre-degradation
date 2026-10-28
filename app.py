@@ -84,18 +84,6 @@ def circuit_profile(row, selected):
     return f'<div class="f1-stats">{blocks}</div>'
 
 
-def prediction_chart(kept, result):
-    colors = alt.Scale(domain=["Actual", "Pre-lap model", "Live model"], range=["#F2F2F2", "#8E8E93", "#E10600"])
-    frames = [pd.DataFrame({"lap": kept["LapNumber"], "time": kept["LapTime"], "series": "Actual"}).dropna(), pd.DataFrame({"lap": kept["LapNumber"], "time": result["pre_lap"], "series": "Pre-lap model"}), pd.DataFrame({"lap": kept["LapNumber"], "time": result["live"], "series": "Live model"})]
-    long = pd.concat(frames, ignore_index=True)
-    x = alt.X("lap:Q", title="Lap", scale=alt.Scale(zero=False), axis=alt.Axis(format="d", tickMinStep=1))
-    y = alt.Y("time:Q", title="Lap time (s)", scale=alt.Scale(zero=False))
-    color = alt.Color("series:N", scale=colors, legend=alt.Legend(orient="top", title=None, symbolOpacity=1))
-    lines = alt.Chart(long[long["series"] != "Actual"]).mark_line(strokeWidth=2.5).encode(x=x, y=y, color=color)
-    dots = alt.Chart(long[long["series"] == "Actual"]).mark_circle(size=70, opacity=0.9).encode(x=x, y=y, color=color, tooltip=["lap", "time"])
-    return themed(alt.layer(lines, dots).properties(height=320))
-
-
 def result_table(kept, result):
     html = "<table><tr><th>Lap</th><th>Tyre age</th><th>Compound</th><th>Actual (s)</th><th>Pre-lap (s)</th><th>Live (s)</th><th>Pre-lap error</th><th>Live error</th></tr>"
     for i in range(len(kept)):
@@ -160,7 +148,6 @@ def lap_time_tab(served, defaults, circuits, example_data):
     result = serving.predict_laps(served, built, settings["median_s"])
     result["live"] = np.where(built["prev_delta"].isna().to_numpy(), np.nan, result["live"])
     st.write("")
-    st.altair_chart(prediction_chart(kept, result), use_container_width=True, theme=None)
     st.markdown(result_table(kept, result), unsafe_allow_html=True)
     has_actual = kept["LapTime"].notna().to_numpy()
     if has_actual.any():
