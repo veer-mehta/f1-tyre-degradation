@@ -2,6 +2,8 @@
 
 How much slower does an F1 car get with every lap on a tyre, and how fast is a lap going to be? Built from scratch with NumPy and pandas on FastF1 race data (2022 to 2025). No scikit-learn, XGBoost or PyTorch.
 
+Live demo: [f1-tyre-degradation-predictor.streamlit.app](https://f1-tyre-degradation-predictor.streamlit.app)
+
 ![Predictor](report/app_predictor.png)
 
 ## What it does
